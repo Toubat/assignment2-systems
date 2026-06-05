@@ -17,6 +17,8 @@ dependencies = [
     "pandas>=2",
     "ty>=0.0.29",
     "ruff>=0.15.10",
+    "modal>=1.4.3",
+    "ipykernel>=7.2.0",
 ]
 
 [build-system]
