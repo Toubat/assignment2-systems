@@ -45,7 +45,7 @@ def run_benchmark(
     num_heads: int,
     num_warmups: int,
     num_trials: int,
-) -> dict[str, float | None]:
+) -> dict[str, dict[str, float] | None]:
     import torch
 
     from cs336_systems.benchmarking import (
@@ -56,9 +56,7 @@ def run_benchmark(
         benchmark,
     )
 
-    assert (
-        torch.cuda.is_available()
-    ), "expected a CUDA device inside the Modal GPU container"
+    assert torch.cuda.is_available(), "expected a CUDA device inside the Modal GPU container"
     print(f"[{name}] running on {torch.cuda.get_device_name(0)}")
 
     config = LMConfig(
@@ -74,18 +72,21 @@ def run_benchmark(
         "forward": lambda: ForwardOp(config),
         "backward": lambda: BackwardOp(config),
         "forward_backward": lambda: ForwardBackwardOp(config, with_optimizer=False),
-        "forward_backward_optimizer": lambda: ForwardBackwardOp(
-            config, with_optimizer=True
-        ),
+        "forward_backward_optimizer": lambda: ForwardBackwardOp(config, with_optimizer=True),
     }
 
-    results: dict[str, float | None] = {}
+    results: dict[str, dict[str, float] | None] = {}
     for op_name in OP_NAMES:
         print(f"[{name}] --- {op_name} ---")
         try:
-            results[op_name] = benchmark(
-                ops[op_name](), num_warmups=num_warmups, num_trials=num_trials
-            )
+            raw = benchmark(ops[op_name](), num_warmups=num_warmups, num_trials=num_trials)
+            # Accept either `mean` or `(mean, std)` so this works whether or not
+            # benchmark() has been updated to also return the standard deviation.
+            if isinstance(raw, tuple):
+                mean, std = raw
+            else:
+                mean, std = raw, None
+            results[op_name] = {"mean": mean, "std": std}
         except torch.cuda.OutOfMemoryError:
             print(f"[{name}] {op_name}: OOM")
             results[op_name] = None
@@ -93,7 +94,17 @@ def run_benchmark(
     return results
 
 
-def _format_table(results: dict[str, dict[str, float | None]], num_trials: int) -> str:
+def _format_cell(op_result: dict[str, float] | None) -> str:
+    if op_result is None:
+        return "OOM"
+    mean = op_result["mean"]
+    std = op_result.get("std")
+    if std is None:
+        return f"{mean:.3f}"
+    return f"{mean:.3f} ± {std:.3f}"
+
+
+def _format_table(results: dict[str, dict[str, dict[str, float] | None]], num_trials: int) -> str:
     headers = ["Size", "forward", "backward", "fwd+bwd", "fwd+bwd+opt"]
     rows = [headers]
     for size in MODEL_SIZES:
@@ -101,8 +112,7 @@ def _format_table(results: dict[str, dict[str, float | None]], num_trials: int) 
         res = results.get(name, {})
         row = [name]
         for op_name in OP_NAMES:
-            val = res.get(op_name)
-            row.append("OOM" if val is None else f"{val:.3f}")
+            row.append(_format_cell(res.get(op_name)))
         rows.append(row)
 
     widths = [max(len(r[i]) for r in rows) for i in range(len(headers))]
@@ -113,7 +123,7 @@ def _format_table(results: dict[str, dict[str, float | None]], num_trials: int) 
 
     line = "-" * (sum(widths) + len(sep) * (len(headers) - 1))
     out = [
-        f"=== Benchmark Results (ms/step, mean over {num_trials} trials) ===",
+        f"=== Benchmark Results (ms/step, mean ± std over {num_trials} trials) ===",
         fmt_row(rows[0]),
         line,
         *[fmt_row(r) for r in rows[1:]],
@@ -125,8 +135,8 @@ def _format_table(results: dict[str, dict[str, float | None]], num_trials: int) 
 def main(
     vocab_size: int = 10000,
     context_length: int = 512,
-    num_warmups: int = 10,
-    num_trials: int = 20,
+    num_warmups: int = 15,
+    num_trials: int = 50,
 ):
     # Spawn one container per model size so all sizes run concurrently.
     handles = []
@@ -144,7 +154,7 @@ def main(
         )
         handles.append((size["name"], handle))
 
-    results: dict[str, dict[str, float | None]] = {}
+    results: dict[str, dict[str, dict[str, float] | None]] = {}
     for name, handle in handles:
         results[name] = handle.get()
 
@@ -152,12 +162,12 @@ def main(
 
 
 """
-=== Benchmark Results (ms/step, mean over 20 trials) ===
-  Size  forward  backward  fwd+bwd  fwd+bwd+opt
------------------------------------------------
- small   13.733    21.173   36.268       48.777
-medium   28.512    42.877   68.380      103.289
- large   42.200    89.155  126.567      182.024
-    xl   91.632   224.581  316.380      483.907
-   10B  299.477       OOM      OOM          OOM
+=== Benchmark Results (ms/step, mean ± std over 50 trials) ===
+  Size          forward         backward          fwd+bwd      fwd+bwd+opt
+--------------------------------------------------------------------------
+ small   14.458 ± 0.459   22.932 ± 0.850   37.338 ± 0.844   51.603 ± 1.420
+medium   42.941 ± 0.939   60.613 ± 3.344  104.344 ± 4.600  139.607 ± 4.857
+ large   38.605 ± 0.036   85.545 ± 0.038  124.651 ± 0.106  176.330 ± 1.513
+    xl   92.384 ± 0.325  225.470 ± 0.118  317.775 ± 0.225  485.795 ± 0.398
+   10B  301.374 ± 0.890              OOM              OOM              OOM
 """

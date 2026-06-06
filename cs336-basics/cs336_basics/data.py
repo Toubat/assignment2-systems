@@ -6,14 +6,11 @@ import torch
 
 
 def get_random_batch(
-    dataset_size: int,
-    vocab_size: int,
-    batch_size: int,
-    context_length: int,
-    device: str
+    dataset_size: int, vocab_size: int, batch_size: int, context_length: int, device: str
 ) -> tuple[torch.Tensor, torch.Tensor]:
     dataset = np.random.randint(0, vocab_size, (dataset_size))
     return get_batch(dataset, batch_size, context_length, device)
+
 
 def get_batch(
     dataset: npt.NDArray, batch_size: int, context_length: int, device: str

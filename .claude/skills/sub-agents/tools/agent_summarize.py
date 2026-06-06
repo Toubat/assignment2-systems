@@ -24,7 +24,7 @@ Usage:
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 
@@ -37,13 +37,13 @@ def write_report(agent_dir: Path, title: str, body: str, data: dict | None) -> s
     reports_dir = agent_dir / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     # Count existing reports for ordering
     existing = len(list(reports_dir.glob("*.json")))
     filename = f"{existing:04d}-{timestamp}.json"
 
     report = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "title": title,
         "body": body,
     }
@@ -59,7 +59,7 @@ def write_report(agent_dir: Path, title: str, body: str, data: dict | None) -> s
 def write_done(agent_dir: Path, status: str, summary: str, findings: list[str], data: dict | None) -> None:
     """Signal completion with a final summary."""
     done = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "status": status,
         "summary": summary,
     }
@@ -102,7 +102,7 @@ def main():
         try:
             data = json.loads(args.data)
         except json.JSONDecodeError:
-            print(f"Error: --data must be valid JSON", file=sys.stderr)
+            print("Error: --data must be valid JSON", file=sys.stderr)
             sys.exit(1)
 
     if args.command == "report":

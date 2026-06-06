@@ -1,17 +1,15 @@
+import random
+import statistics
+import timeit
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Callable
 
+import torch
 from cs336_basics.data import get_random_batch
 from cs336_basics.model import BasicsTransformerLM
 from cs336_basics.nn_utils import cross_entropy
-
-import torch
-import timeit
-import random
 from cs336_basics.optimizer import AdamW
-
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -27,7 +25,6 @@ class LMConfig:
 
 
 class BenchOp(ABC):
-
     @abstractmethod
     def setup(self) -> None:
         raise NotImplementedError
@@ -42,7 +39,6 @@ class BenchOp(ABC):
 
 
 class ForwardOp(BenchOp):
-
     def __init__(self, config: LMConfig):
         self.config = config
 
@@ -152,7 +148,7 @@ class CUDATimer(Timer):
         return self.start_event.elapsed_time(self.stop_event)
 
 
-def benchmark(op: BenchOp, num_warmups: int = 10, num_trials: int = 20) -> float:
+def benchmark(op: BenchOp, num_warmups: int = 10, num_trials: int = 20) -> tuple[float, float]:
     """Benchmark the given function by running it for a number of warmups and trials."""
     timer = CUDATimer() if DEVICE == "cuda" else PythonTimer()
 
@@ -175,8 +171,10 @@ def benchmark(op: BenchOp, num_warmups: int = 10, num_trials: int = 20) -> float
         times.append(timer.elapsed())
 
     mean_time = sum(times) / len(times)
-    print(f"Mean time for: {mean_time} ms")
-    return mean_time
+    std_time = statistics.stdev(times)
+
+    print(f"Mean time for: {mean_time} ms ± {std_time} ms")
+    return mean_time, std_time
 
 
 def get_transformer_lm(config: LMConfig) -> BasicsTransformerLM:
@@ -191,12 +189,8 @@ def get_transformer_lm(config: LMConfig) -> BasicsTransformerLM:
 
 
 @lru_cache
-def batch_input(
-    vocab_size: int, context_length: int
-) -> tuple[torch.Tensor, torch.Tensor]:
-    print(
-        f"Getting batch input for vocab size {vocab_size} and context length {context_length}"
-    )
+def batch_input(vocab_size: int, context_length: int) -> tuple[torch.Tensor, torch.Tensor]:
+    print(f"Getting batch input for vocab size {vocab_size} and context length {context_length}")
     X, y = get_random_batch(
         dataset_size=10000,
         vocab_size=vocab_size,

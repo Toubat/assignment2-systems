@@ -36,9 +36,7 @@ _GPU_PARAM = None if GPU_SPEC.lower() == "cpu" else GPU_SPEC
 
 app = modal.App(APP_NAME)
 
-workspace_volume = modal.Volume.from_name(
-    "gpu-sandbox-workspace", create_if_missing=True
-)
+workspace_volume = modal.Volume.from_name("gpu-sandbox-workspace", create_if_missing=True)
 
 image = (
     modal.Image.from_registry(f"nvidia/cuda:{CUDA_TAG}", add_python="3.12")
@@ -72,8 +70,7 @@ image = (
 
 def _rsync(src: str, dst: str) -> None:
     subprocess.run(
-        ["rsync", "-a", "--delete", "--exclude", ".git/",
-         f"{src.rstrip('/')}/", f"{dst.rstrip('/')}/"],
+        ["rsync", "-a", "--delete", "--exclude", ".git/", f"{src.rstrip('/')}/", f"{dst.rstrip('/')}/"],
         check=True,
     )
 
