@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 import random
 import statistics
 import timeit
@@ -148,15 +149,18 @@ class CUDATimer(Timer):
         return self.start_event.elapsed_time(self.stop_event)
 
 
-def benchmark(op: BenchOp, num_warmups: int = 10, num_trials: int = 20) -> tuple[float, float]:
+def benchmark(op: BenchOp, num_warmups: int = 10, num_trials: int = 20, autocast_bfloat16: bool = False) -> tuple[float, float]:
     """Benchmark the given function by running it for a number of warmups and trials."""
     timer = CUDATimer() if DEVICE == "cuda" else PythonTimer()
 
     op.setup()
 
+    ctx = torch.autocast(device_type="cuda", dtype=torch.bfloat16) if autocast_bfloat16 else nullcontext()
+
     for _ in range(num_warmups):
-        op.prepare_run()
-        op.run()
+        with ctx:
+            op.prepare_run()
+            op.run()
 
     with timer:
         pass
@@ -165,8 +169,9 @@ def benchmark(op: BenchOp, num_warmups: int = 10, num_trials: int = 20) -> tuple
     for _ in range(num_trials):
         op.prepare_run()
 
-        with timer:
-            op.run()
+        with ctx:
+            with timer:
+                op.run()
 
         times.append(timer.elapsed())
 

@@ -30,7 +30,7 @@ def autocast():
     model = ToyModel(10, 10).to("cuda")
     x = torch.randn(10, 10, dtype=torch.float32).to("cuda")
     target = torch.randint(0, 10, (10,), device="cuda")
-    with torch.autocast(device_type="cuda", dtype=torch.float16):
+    with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
         logits = model(x)
         loss = torch.nn.functional.cross_entropy(logits, target)
         print("loss", loss.dtype)

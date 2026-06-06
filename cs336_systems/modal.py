@@ -10,7 +10,7 @@ from pathlib import Path
 import modal
 
 # GPU type to provision. Swap for "A100", "A10G", "L4", "H200", etc.
-GPU = "H100"
+GPU = "H200"
 
 app = modal.App("cs336-benchmarking")
 

@@ -45,6 +45,7 @@ def run_benchmark(
     num_heads: int,
     num_warmups: int,
     num_trials: int,
+    autocast_bfloat16: bool = False,
 ) -> dict[str, dict[str, float] | None]:
     import torch
 
@@ -79,7 +80,8 @@ def run_benchmark(
     for op_name in OP_NAMES:
         print(f"[{name}] --- {op_name} ---")
         try:
-            raw = benchmark(ops[op_name](), num_warmups=num_warmups, num_trials=num_trials)
+            raw = benchmark(ops[op_name](), num_warmups=num_warmups, num_trials=num_trials, autocast_bfloat16=autocast_bfloat16)
+
             # Accept either `mean` or `(mean, std)` so this works whether or not
             # benchmark() has been updated to also return the standard deviation.
             if isinstance(raw, tuple):
@@ -131,14 +133,14 @@ def _format_table(results: dict[str, dict[str, dict[str, float] | None]], num_tr
     return "\n".join(out)
 
 
-@app.local_entrypoint()
-def main(
-    vocab_size: int = 10000,
-    context_length: int = 512,
-    num_warmups: int = 15,
-    num_trials: int = 50,
-):
-    # Spawn one container per model size so all sizes run concurrently.
+def _spawn_sweep(
+    autocast_bfloat16: bool,
+    vocab_size: int,
+    context_length: int,
+    num_warmups: int,
+    num_trials: int,
+) -> list[tuple[str, object]]:
+    # Spawn one container per model size (non-blocking) so they run concurrently.
     handles = []
     for size in MODEL_SIZES:
         handle = run_benchmark.spawn(
@@ -151,23 +153,55 @@ def main(
             num_heads=size["num_heads"],
             num_warmups=num_warmups,
             num_trials=num_trials,
+            autocast_bfloat16=autocast_bfloat16,
         )
         handles.append((size["name"], handle))
+    return handles
 
-    results: dict[str, dict[str, dict[str, float] | None]] = {}
-    for name, handle in handles:
-        results[name] = handle.get()
 
-    print("\n" + _format_table(results, num_trials))
+def _gather(handles: list[tuple[str, object]]) -> dict[str, dict[str, dict[str, float] | None]]:
+    return {name: handle.get() for name, handle in handles}
+
+
+@app.local_entrypoint()
+def main(
+    vocab_size: int = 10000,
+    context_length: int = 512,
+    num_warmups: int = 15,
+    num_trials: int = 50,
+):
+    # Spawn BOTH sweeps first (all 10 containers launch), then gather — so fp32
+    # and bf16 run concurrently rather than one sweep after the other.
+    fp32_handles = _spawn_sweep(False, vocab_size, context_length, num_warmups, num_trials)
+    bf16_handles = _spawn_sweep(True, vocab_size, context_length, num_warmups, num_trials)
+
+    fp32 = _gather(fp32_handles)
+    bf16 = _gather(bf16_handles)
+
+    print("\n### FULL PRECISION (fp32) ###")
+    print(_format_table(fp32, num_trials))
+    print("\n### MIXED PRECISION (bf16 autocast) ###")
+    print(_format_table(bf16, num_trials))
 
 
 """
+### FULL PRECISION (fp32) ###
 === Benchmark Results (ms/step, mean ± std over 50 trials) ===
-  Size          forward         backward          fwd+bwd      fwd+bwd+opt
---------------------------------------------------------------------------
- small   14.458 ± 0.459   22.932 ± 0.850   37.338 ± 0.844   51.603 ± 1.420
-medium   42.941 ± 0.939   60.613 ± 3.344  104.344 ± 4.600  139.607 ± 4.857
- large   38.605 ± 0.036   85.545 ± 0.038  124.651 ± 0.106  176.330 ± 1.513
-    xl   92.384 ± 0.325  225.470 ± 0.118  317.775 ± 0.225  485.795 ± 0.398
-   10B  301.374 ± 0.890              OOM              OOM              OOM
+  Size          forward         backward           fwd+bwd      fwd+bwd+opt
+---------------------------------------------------------------------------
+ small   13.427 ± 0.139   21.084 ± 0.238    34.702 ± 0.690   48.244 ± 0.799
+medium   24.436 ± 0.497   41.691 ± 0.866    68.020 ± 0.998   91.040 ± 1.327
+ large   38.324 ± 0.071   83.421 ± 0.316   120.795 ± 0.134  161.573 ± 0.185
+    xl   90.165 ± 0.078  217.067 ± 0.164   307.351 ± 0.165  428.932 ± 0.314
+   10B  295.671 ± 0.866  708.629 ± 0.072  1001.089 ± 0.591              OOM
+
+### MIXED PRECISION (bf16 autocast) ###
+=== Benchmark Results (ms/step, mean ± std over 50 trials) ===
+  Size         forward         backward          fwd+bwd      fwd+bwd+opt
+-------------------------------------------------------------------------
+ small  13.511 ± 0.034   22.968 ± 0.210   35.368 ± 0.083   46.899 ± 0.331
+medium  31.255 ± 0.222   53.798 ± 0.265   81.156 ± 0.672  111.184 ± 0.370
+ large  41.052 ± 0.250   69.693 ± 3.447  105.408 ± 1.038  144.338 ± 1.207
+    xl  36.511 ± 0.485   85.749 ± 0.063  107.263 ± 0.868  230.229 ± 1.539
+   10B  62.628 ± 0.050  255.622 ± 0.105  282.467 ± 0.093              OOM
 """
