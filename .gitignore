@@ -2,6 +2,10 @@
 cs336-spring2024-assignment-2-submission.zip
 test_results.xml
 
+# Memory profiler snapshots (large pickle files)
+.profile/
+*.pickle
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

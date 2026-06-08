@@ -46,7 +46,11 @@ def run_benchmark(
     num_warmups: int,
     num_trials: int,
     autocast_bfloat16: bool = False,
-) -> dict[str, dict[str, float] | None]:
+    profile_memory: bool = False,
+) -> dict[str, object]:
+    import tempfile
+    from pathlib import Path
+
     import torch
 
     from cs336_systems.benchmarking import (
@@ -77,10 +81,22 @@ def run_benchmark(
     }
 
     results: dict[str, dict[str, float] | None] = {}
+    # Pickle bytes per op; shipped back to the local entrypoint to write under .profile/.
+    snapshots: dict[str, bytes] = {}
     for op_name in OP_NAMES:
         print(f"[{name}] --- {op_name} ---")
+        snapshot_path = None
+        if profile_memory:
+            # Container-local (ephemeral) path; we read the bytes back below.
+            snapshot_path = str(Path(tempfile.gettempdir()) / f"{name}_{op_name}.pickle")
         try:
-            raw = benchmark(ops[op_name](), num_warmups=num_warmups, num_trials=num_trials, autocast_bfloat16=autocast_bfloat16)
+            raw = benchmark(
+                ops[op_name](),
+                num_warmups=num_warmups,
+                num_trials=num_trials,
+                autocast_bfloat16=autocast_bfloat16,
+                memory_snapshot_path=snapshot_path,
+            )
 
             # Accept either `mean` or `(mean, std)` so this works whether or not
             # benchmark() has been updated to also return the standard deviation.
@@ -89,11 +105,14 @@ def run_benchmark(
             else:
                 mean, std = raw, None
             results[op_name] = {"mean": mean, "std": std}
+
+            if snapshot_path is not None and Path(snapshot_path).exists():
+                snapshots[op_name] = Path(snapshot_path).read_bytes()
         except torch.cuda.OutOfMemoryError:
             print(f"[{name}] {op_name}: OOM")
             results[op_name] = None
             torch.cuda.empty_cache()
-    return results
+    return {"results": results, "snapshots": snapshots}
 
 
 def _format_cell(op_result: dict[str, float] | None) -> str:
@@ -139,6 +158,7 @@ def _spawn_sweep(
     context_length: int,
     num_warmups: int,
     num_trials: int,
+    profile_memory: bool = False,
 ) -> list[tuple[str, object]]:
     # Spawn one container per model size (non-blocking) so they run concurrently.
     handles = []
@@ -154,13 +174,33 @@ def _spawn_sweep(
             num_warmups=num_warmups,
             num_trials=num_trials,
             autocast_bfloat16=autocast_bfloat16,
+            profile_memory=profile_memory,
         )
         handles.append((size["name"], handle))
     return handles
 
 
-def _gather(handles: list[tuple[str, object]]) -> dict[str, dict[str, dict[str, float] | None]]:
+def _gather(handles: list[tuple[str, object]]) -> dict[str, dict[str, object]]:
     return {name: handle.get() for name, handle in handles}
+
+
+def _results_only(gathered: dict[str, dict[str, object]]) -> dict[str, dict[str, dict[str, float] | None]]:
+    return {name: payload["results"] for name, payload in gathered.items()}
+
+
+def _write_snapshots(gathered: dict[str, dict[str, object]], precision: str, out_dir: str = ".profile") -> int:
+    from pathlib import Path
+
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    written = 0
+    for name, payload in gathered.items():
+        for op_name, data in payload.get("snapshots", {}).items():
+            dest = out / f"{precision}_{name}_{op_name}.pickle"
+            dest.write_bytes(data)
+            written += 1
+            print(f"wrote {dest} ({len(data)} bytes)")
+    return written
 
 
 @app.local_entrypoint()
@@ -169,19 +209,25 @@ def main(
     context_length: int = 512,
     num_warmups: int = 15,
     num_trials: int = 50,
+    profile_memory: bool = False,
 ):
     # Spawn BOTH sweeps first (all 10 containers launch), then gather — so fp32
     # and bf16 run concurrently rather than one sweep after the other.
-    fp32_handles = _spawn_sweep(False, vocab_size, context_length, num_warmups, num_trials)
-    bf16_handles = _spawn_sweep(True, vocab_size, context_length, num_warmups, num_trials)
+    fp32_handles = _spawn_sweep(False, vocab_size, context_length, num_warmups, num_trials, profile_memory)
+    bf16_handles = _spawn_sweep(True, vocab_size, context_length, num_warmups, num_trials, profile_memory)
 
     fp32 = _gather(fp32_handles)
     bf16 = _gather(bf16_handles)
 
     print("\n### FULL PRECISION (fp32) ###")
-    print(_format_table(fp32, num_trials))
+    print(_format_table(_results_only(fp32), num_trials))
     print("\n### MIXED PRECISION (bf16 autocast) ###")
-    print(_format_table(bf16, num_trials))
+    print(_format_table(_results_only(bf16), num_trials))
+
+    if profile_memory:
+        print("\n### Memory snapshots -> .profile/ (load at https://pytorch.org/memory_viz) ###")
+        n = _write_snapshots(fp32, "fp32") + _write_snapshots(bf16, "bf16")
+        print(f"wrote {n} snapshot file(s)")
 
 
 """

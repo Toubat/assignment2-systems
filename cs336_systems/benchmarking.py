@@ -1,7 +1,6 @@
 from contextlib import nullcontext
 import random
 import statistics
-import timeit
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from functools import lru_cache
@@ -94,86 +93,53 @@ class ForwardBackwardOp(BenchOp):
             self.optimizer.step()
 
 
-class Timer(ABC):
-    @abstractmethod
-    def start(self) -> None:
-        raise NotImplementedError
+def benchmark(
+    op: BenchOp,
+    num_warmups: int = 10,
+    num_trials: int = 20,
+    autocast_bfloat16: bool = False,
+    memory_snapshot_path: str | None = None,
+) -> tuple[float, float]:
+    """Benchmark the given function by running it for a number of warmups and trials.
 
-    @abstractmethod
-    def stop(self) -> None:
-        raise NotImplementedError
-
-    @abstractmethod
-    def elapsed(self) -> float:
-        raise NotImplementedError
-
-    def __enter__(self) -> None:
-        self.start()
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback) -> float:
-        self.stop()
-        return self.elapsed()
-
-
-class PythonTimer(Timer):
-    """timeit.default_timer() module wrapper"""
-
-    def __init__(self):
-        self.start_time = None
-        self.stop_time = None
-
-    def start(self) -> None:
-        self.start_time = timeit.default_timer()
-
-    def stop(self) -> None:
-        self.stop_time = timeit.default_timer()
-
-    def elapsed(self) -> float:
-        return (self.stop_time - self.start_time) * 1000
-
-
-class CUDATimer(Timer):
-    def __init__(self):
-        self.start_event = torch.cuda.Event(enable_timing=True)
-        self.stop_event = torch.cuda.Event(enable_timing=True)
-
-    def start(self) -> None:
-        self.start_event.record()
-
-    def stop(self) -> None:
-        self.stop_event.record()
-        torch.cuda.synchronize()
-
-    def elapsed(self) -> float:
-        return self.start_event.elapsed_time(self.stop_event)
-
-
-def benchmark(op: BenchOp, num_warmups: int = 10, num_trials: int = 20, autocast_bfloat16: bool = False) -> tuple[float, float]:
-    """Benchmark the given function by running it for a number of warmups and trials."""
-    timer = CUDATimer() if DEVICE == "cuda" else PythonTimer()
+    When ``memory_snapshot_path`` is set, a CUDA memory snapshot of the timed
+    trials is dumped to that path (load it at https://pytorch.org/memory_viz).
+    Recording starts only after warm-up so allocator warm-up noise is excluded.
+    """
+    assert torch.cuda.is_available(), "benchmark() requires CUDA"
 
     op.setup()
 
     ctx = torch.autocast(device_type="cuda", dtype=torch.bfloat16) if autocast_bfloat16 else nullcontext()
+
+    start_event = torch.cuda.Event(enable_timing=True)
+    stop_event = torch.cuda.Event(enable_timing=True)
 
     for _ in range(num_warmups):
         with ctx:
             op.prepare_run()
             op.run()
 
-    with timer:
-        pass
+    torch.cuda.synchronize()
+
+    if memory_snapshot_path is not None:
+        torch.cuda.memory._record_memory_history(max_entries=1000000)
 
     times: list[float] = []
     for _ in range(num_trials):
         op.prepare_run()
 
         with ctx:
-            with timer:
-                op.run()
+            start_event.record()
+            op.run()
+            stop_event.record()
 
-        times.append(timer.elapsed())
+        torch.cuda.synchronize()
+        times.append(start_event.elapsed_time(stop_event))
+
+    if memory_snapshot_path is not None:
+        torch.cuda.memory._dump_snapshot(memory_snapshot_path)
+        torch.cuda.memory._record_memory_history(enabled=None)
 
     mean_time = sum(times) / len(times)
     std_time = statistics.stdev(times)
