@@ -7,9 +7,11 @@ from functools import lru_cache
 
 import torch
 from cs336_basics.data import get_random_batch
-from cs336_basics.model import BasicsTransformerLM
+from cs336_basics.model import BasicsTransformerLM, RotaryEmbedding, TransformerBlock
 from cs336_basics.nn_utils import cross_entropy
 from cs336_basics.optimizer import AdamW
+
+from cs336_systems.gradient_checkpoint import linear_checkpoint, recursive_checkpoint
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -93,6 +95,62 @@ class ForwardBackwardOp(BenchOp):
             self.optimizer.step()
 
 
+class _CheckpointBenchOp(BenchOp):
+    """Shared setup for gradient-checkpointing benchmarks.
+
+    Builds a single (compiled) ``TransformerBlock`` on the GPU and applies it
+    ``num_layers`` times via a checkpointing strategy supplied by subclasses.
+    """
+
+    def __init__(self, config: LMConfig):
+        self.config = config
+
+    def setup(self) -> None:
+        block = TransformerBlock(
+            self.config.d_model,
+            self.config.num_heads,
+            self.config.d_ff,
+            RotaryEmbedding(
+                self.config.context_length,
+                self.config.d_model // self.config.num_heads,
+            ),
+        ).to(DEVICE)
+        self.block = torch.compile(block, fullgraph=True)
+
+    def prepare_run(self) -> None:
+        self.x = torch.randn(
+            (4, self.config.context_length, self.config.d_model),
+            requires_grad=True,
+            device=DEVICE,
+        )
+
+    def apply_blocks(self, x: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError
+
+    def run(self) -> None:
+        x = self.apply_blocks(self.x)
+        x.sum().backward()
+
+
+class RecursiveCheckpointOp(_CheckpointBenchOp):
+    def apply_blocks(self, x: torch.Tensor) -> torch.Tensor:
+        return recursive_checkpoint(self.block, x, num_layers=self.config.num_layers)
+
+
+class LinearCheckpointOp(_CheckpointBenchOp):
+    def __init__(self, config: LMConfig, group_size: int):
+        super().__init__(config)
+        self.group_size = group_size
+
+    def apply_blocks(self, x: torch.Tensor) -> torch.Tensor:
+        return linear_checkpoint(
+            self.block,
+            x,
+            num_layers=self.config.num_layers,
+            group_size=self.group_size,
+        )
+
+
 def benchmark(
     op: BenchOp,
     num_warmups: int = 10,
@@ -110,7 +168,11 @@ def benchmark(
 
     op.setup()
 
-    ctx = torch.autocast(device_type="cuda", dtype=torch.bfloat16) if autocast_bfloat16 else nullcontext()
+    ctx = (
+        torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+        if autocast_bfloat16
+        else nullcontext()
+    )
 
     start_event = torch.cuda.Event(enable_timing=True)
     stop_event = torch.cuda.Event(enable_timing=True)
@@ -121,6 +183,10 @@ def benchmark(
             op.run()
 
     torch.cuda.synchronize()
+
+    # Reset after warm-up so peak-memory readings reflect only the timed trials
+    # (excludes torch.compile / allocator warm-up transients).
+    torch.cuda.reset_peak_memory_stats()
 
     if memory_snapshot_path is not None:
         torch.cuda.memory._record_memory_history(max_entries=1000000)
@@ -160,8 +226,12 @@ def get_transformer_lm(config: LMConfig) -> BasicsTransformerLM:
 
 
 @lru_cache
-def batch_input(vocab_size: int, context_length: int) -> tuple[torch.Tensor, torch.Tensor]:
-    print(f"Getting batch input for vocab size {vocab_size} and context length {context_length}")
+def batch_input(
+    vocab_size: int, context_length: int
+) -> tuple[torch.Tensor, torch.Tensor]:
+    print(
+        f"Getting batch input for vocab size {vocab_size} and context length {context_length}"
+    )
     X, y = get_random_batch(
         dataset_size=10000,
         vocab_size=vocab_size,
