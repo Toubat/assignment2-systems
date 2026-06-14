@@ -192,3 +192,50 @@ def main(num_warmups: int = 3, num_trials: int = 10, autocast_bfloat16: bool = T
 
     print()
     print(_format_table(results, num_trials, autocast_bfloat16))
+
+
+"""
+=== Gradient Checkpointing [bf16 autocast] (ms/step over 10 trials; 300 layers,
+d_model=2048, d_ff=2048, ctx=128, num_heads=16, batch=4) ===   [NVIDIA H200]
+strategy       time (ms)        peak (MiB)
+-----------------------------------------------
+recursive      2212.53 ± 78.40  560.1          <- lowest peak (O(log N) activations)
+linear(g=1)    676.76 ± 68.32   1724.1
+linear(g=2)    632.95 ± 78.34   1208.2
+linear(g=3)    637.14 ± 74.40   1092.4
+linear(g=4)    602.69 ± 67.24   1076.5         <- min peak among flat (= sweet spot)
+linear(g=5)    565.03 ± 66.40   1100.6
+linear(g=6)    591.50 ± 97.52   1144.7
+linear(g=7)    592.71 ± 80.84   1200.8
+linear(g=8)    613.13 ± 101.12  1264.9
+linear(g=10)   640.20 ± 131.89  1401.1
+linear(g=12)   549.39 ± 68.63   1549.4
+linear(g=15)   574.66 ± 60.46   1781.7
+linear(g=20)   560.18 ± 74.91   2182.3
+linear(g=30)   558.49 ± 87.82   3003.4
+linear(g=50)   588.75 ± 102.02  4669.7
+linear(g=100)  560.34 ± 78.13   8863.3
+linear(g=300)  572.42 ± 84.84   25597.9
+
+Analysis
+--------
+Flat (linear) peak follows  peak(g) ~= (N/g)*a + g*b + C, with the empirical fit:
+    a (one boundary [4,128,2048] fp32)  ~= 4 MiB
+    b (one block's recompute residual)  ~= 84 MiB   ->  b/a ~= 21
+    C (params + grads + bf16 copies)    ~= 290 MiB
+  => optimum g* = sqrt(N*a/b) = sqrt(300*4/84) ~= 3.8  (matches measured min at g=4;
+     neighbors g=3 -> 1092.4 and g=5 -> 1100.6 are both higher, confirming the min).
+
+  Note this is < sqrt(N)=17.3: the textbook sqrt(N) assumes a ~= b, but a real block
+  saves ~b/a ~= 20 boundaries' worth of residuals (Q/K/V/attn-out/FFN), so g* is pulled
+  down. The hard floor is ~4-5 (Q/K/V/attn-out are each one boundary in size).
+
+Recursive (nested) checkpointing holds only O(log N) live boundaries + one block, so
+its 560 MiB peak is almost entirely fixed model state (params+grads+bf16 ~290 MiB) plus
+a small activation tail (~84 MiB block + ~log2(300)~8 boundaries). It wins on memory by
+~2x vs the best flat size but pays ~3.7x in time (O(N log N) recompute).
+
+Earlier configs for reference (same harness):
+  ctx=2048, N=50, d_model=1024, d_ff=4096: monotonic, min at g=1 (b/a ~= 41 -> g* ~= 1)
+  ctx=512,  N=200, d_model=1024, d_ff=4096: U-shape, min at g=3 (b/a ~= 23 -> g* ~= 3)
+"""
