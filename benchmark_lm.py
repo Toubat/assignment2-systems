@@ -47,6 +47,7 @@ def run_benchmark(
     num_trials: int,
     autocast_bfloat16: bool = False,
     profile_memory: bool = False,
+    compile_model: bool = False,
 ) -> dict[str, object]:
     import tempfile
     from pathlib import Path
@@ -61,7 +62,9 @@ def run_benchmark(
         benchmark,
     )
 
-    assert torch.cuda.is_available(), "expected a CUDA device inside the Modal GPU container"
+    assert (
+        torch.cuda.is_available()
+    ), "expected a CUDA device inside the Modal GPU container"
     print(f"[{name}] running on {torch.cuda.get_device_name(0)}")
 
     config = LMConfig(
@@ -74,10 +77,14 @@ def run_benchmark(
     )
 
     ops = {
-        "forward": lambda: ForwardOp(config),
-        "backward": lambda: BackwardOp(config),
-        "forward_backward": lambda: ForwardBackwardOp(config, with_optimizer=False),
-        "forward_backward_optimizer": lambda: ForwardBackwardOp(config, with_optimizer=True),
+        "forward": lambda: ForwardOp(config, compile_model=compile_model),
+        "backward": lambda: BackwardOp(config, compile_model=compile_model),
+        "forward_backward": lambda: ForwardBackwardOp(
+            config, with_optimizer=False, compile_model=compile_model
+        ),
+        "forward_backward_optimizer": lambda: ForwardBackwardOp(
+            config, with_optimizer=True, compile_model=compile_model
+        ),
     }
 
     results: dict[str, dict[str, float] | None] = {}
@@ -88,7 +95,9 @@ def run_benchmark(
         snapshot_path = None
         if profile_memory:
             # Container-local (ephemeral) path; we read the bytes back below.
-            snapshot_path = str(Path(tempfile.gettempdir()) / f"{name}_{op_name}.pickle")
+            snapshot_path = str(
+                Path(tempfile.gettempdir()) / f"{name}_{op_name}.pickle"
+            )
         try:
             raw = benchmark(
                 ops[op_name](),
@@ -125,7 +134,9 @@ def _format_cell(op_result: dict[str, float] | None) -> str:
     return f"{mean:.3f} ± {std:.3f}"
 
 
-def _format_table(results: dict[str, dict[str, dict[str, float] | None]], num_trials: int) -> str:
+def _format_table(
+    results: dict[str, dict[str, dict[str, float] | None]], num_trials: int
+) -> str:
     headers = ["Size", "forward", "backward", "fwd+bwd", "fwd+bwd+opt"]
     rows = [headers]
     for size in MODEL_SIZES:
@@ -159,6 +170,7 @@ def _spawn_sweep(
     num_warmups: int,
     num_trials: int,
     profile_memory: bool = False,
+    compile_model: bool = False,
 ) -> list[tuple[str, object]]:
     # Spawn one container per model size (non-blocking) so they run concurrently.
     handles = []
@@ -175,6 +187,7 @@ def _spawn_sweep(
             num_trials=num_trials,
             autocast_bfloat16=autocast_bfloat16,
             profile_memory=profile_memory,
+            compile_model=compile_model,
         )
         handles.append((size["name"], handle))
     return handles
@@ -184,11 +197,15 @@ def _gather(handles: list[tuple[str, object]]) -> dict[str, dict[str, object]]:
     return {name: handle.get() for name, handle in handles}
 
 
-def _results_only(gathered: dict[str, dict[str, object]]) -> dict[str, dict[str, dict[str, float] | None]]:
+def _results_only(
+    gathered: dict[str, dict[str, object]],
+) -> dict[str, dict[str, dict[str, float] | None]]:
     return {name: payload["results"] for name, payload in gathered.items()}
 
 
-def _write_snapshots(gathered: dict[str, dict[str, object]], precision: str, out_dir: str = ".profile") -> int:
+def _write_snapshots(
+    gathered: dict[str, dict[str, object]], precision: str, out_dir: str = ".profile"
+) -> int:
     from pathlib import Path
 
     out = Path(out_dir)
@@ -210,11 +227,42 @@ def main(
     num_warmups: int = 15,
     num_trials: int = 50,
     profile_memory: bool = False,
+    compare_compile: bool = False,
 ):
+    # torch_compile (b): vanilla vs torch.compile'd full Transformer (fp32).
+    if compare_compile:
+        vanilla_handles = _spawn_sweep(
+            False,
+            vocab_size,
+            context_length,
+            num_warmups,
+            num_trials,
+            compile_model=False,
+        )
+        compiled_handles = _spawn_sweep(
+            False,
+            vocab_size,
+            context_length,
+            num_warmups,
+            num_trials,
+            compile_model=True,
+        )
+        vanilla = _gather(vanilla_handles)
+        compiled = _gather(compiled_handles)
+        print("\n### VANILLA (eager, fp32) ###")
+        print(_format_table(_results_only(vanilla), num_trials))
+        print("\n### torch.compile (fp32) ###")
+        print(_format_table(_results_only(compiled), num_trials))
+        return
+
     # Spawn BOTH sweeps first (all 10 containers launch), then gather — so fp32
     # and bf16 run concurrently rather than one sweep after the other.
-    fp32_handles = _spawn_sweep(False, vocab_size, context_length, num_warmups, num_trials, profile_memory)
-    bf16_handles = _spawn_sweep(True, vocab_size, context_length, num_warmups, num_trials, profile_memory)
+    fp32_handles = _spawn_sweep(
+        False, vocab_size, context_length, num_warmups, num_trials, profile_memory
+    )
+    bf16_handles = _spawn_sweep(
+        True, vocab_size, context_length, num_warmups, num_trials, profile_memory
+    )
 
     fp32 = _gather(fp32_handles)
     bf16 = _gather(bf16_handles)
@@ -225,7 +273,9 @@ def main(
     print(_format_table(_results_only(bf16), num_trials))
 
     if profile_memory:
-        print("\n### Memory snapshots -> .profile/ (load at https://pytorch.org/memory_viz) ###")
+        print(
+            "\n### Memory snapshots -> .profile/ (load at https://pytorch.org/memory_viz) ###"
+        )
         n = _write_snapshots(fp32, "fp32") + _write_snapshots(bf16, "bf16")
         print(f"wrote {n} snapshot file(s)")
 
@@ -250,4 +300,42 @@ medium  31.255 ± 0.222   53.798 ± 0.265   81.156 ± 0.672  111.184 ± 0.370
  large  41.052 ± 0.250   69.693 ± 3.447  105.408 ± 1.038  144.338 ± 1.207
     xl  36.511 ± 0.485   85.749 ± 0.063  107.263 ± 0.868  230.229 ± 1.539
    10B  62.628 ± 0.050  255.622 ± 0.105  282.467 ± 0.093              OOM
+"""
+
+
+"""
+torch_compile (b): vanilla vs torch.compile'd full Transformer
+Run with:  modal run benchmark_lm.py --compare-compile
+(ms/step, mean +/- std over 50 trials, fp32, context_length=512, NVIDIA H200)
+
+### VANILLA (eager, fp32) ###
+  Size          forward         backward           fwd+bwd      fwd+bwd+opt
+---------------------------------------------------------------------------
+ small   12.684 ± 0.071   20.921 ± 0.069    33.677 ± 0.067   47.032 ± 0.470
+medium   27.959 ± 0.402   42.194 ± 0.570    70.468 ± 0.238   97.307 ± 1.321
+ large   38.199 ± 0.045   82.278 ± 0.055   120.786 ± 0.102  161.528 ± 0.157
+    xl   90.754 ± 0.130  217.195 ± 0.067   308.282 ± 0.146  429.477 ± 0.243
+   10B  298.374 ± 0.807  710.221 ± 0.676  1003.602 ± 0.444              OOM
+
+### torch.compile (fp32) ###
+  Size          forward         backward          fwd+bwd      fwd+bwd+opt
+--------------------------------------------------------------------------
+ small    5.112 ± 0.031   10.696 ± 0.013   16.049 ± 0.050   24.430 ± 0.552
+medium   14.102 ± 0.021   28.297 ± 0.026   42.645 ± 0.041   62.349 ± 0.069
+ large   31.444 ± 0.062   68.642 ± 0.075  100.595 ± 0.180  143.475 ± 6.217
+    xl   81.682 ± 0.079  199.354 ± 0.063  281.926 ± 0.158  403.644 ± 0.196
+   10B  281.757 ± 1.088  669.071 ± 0.194  944.826 ± 0.319              OOM
+
+Response: torch.compile speeds up every configuration. The forward pass benefits
+most (small 12.7->5.1 ms ~2.5x, medium ~2x, large/xl ~1.1-1.2x), since fusing the
+many small pointwise/normalization kernels removes Python+launch overhead that
+dominates the cheaper forward pass. The combined forward+backward and
+forward+backward+optimizer steps also improve consistently (e.g. xl fwd+bwd
+308->282 ms, fwd+bwd+opt 429->404 ms; small fwd+bwd+opt 47->24 ms ~1.9x), though the
+relative gain shrinks for the larger models because they are already matmul-bound
+(the GEMMs, which compile can't make much faster, are the bottleneck). The optimizer
+step itself is elementwise and benefits from fusion too. Speedup is largest where
+overhead is the bottleneck (small models / forward only) and smallest where the work
+is already big dense matmuls (xl/10B). One-time compilation cost is paid during
+warm-up and excluded from the timed trials.
 """

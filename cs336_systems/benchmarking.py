@@ -41,11 +41,14 @@ class BenchOp(ABC):
 
 
 class ForwardOp(BenchOp):
-    def __init__(self, config: LMConfig):
+    def __init__(self, config: LMConfig, compile_model: bool = False):
         self.config = config
+        self.compile_model = compile_model
 
     def setup(self) -> None:
         self.lm = get_transformer_lm(self.config)
+        if self.compile_model:
+            self.lm = torch.compile(self.lm)
 
     def prepare_run(self) -> None:
         self.input, _ = sample_one(self.config)
@@ -55,11 +58,14 @@ class ForwardOp(BenchOp):
 
 
 class BackwardOp(BenchOp):
-    def __init__(self, config: LMConfig):
+    def __init__(self, config: LMConfig, compile_model: bool = False):
         self.config = config
+        self.compile_model = compile_model
 
     def setup(self) -> None:
         self.lm = get_transformer_lm(self.config)
+        if self.compile_model:
+            self.lm = torch.compile(self.lm)
         self.optimizer = AdamW(self.lm.parameters(), lr=1e-3)
 
     def prepare_run(self) -> None:
@@ -74,12 +80,15 @@ class BackwardOp(BenchOp):
 
 
 class ForwardBackwardOp(BenchOp):
-    def __init__(self, config: LMConfig, with_optimizer: bool = True):
+    def __init__(self, config: LMConfig, with_optimizer: bool = True, compile_model: bool = False):
         self.config = config
         self.with_optimizer = with_optimizer
+        self.compile_model = compile_model
 
     def setup(self) -> None:
         self.lm = get_transformer_lm(self.config)
+        if self.compile_model:
+            self.lm = torch.compile(self.lm)
         self.optimizer = AdamW(self.lm.parameters(), lr=1e-3)
 
     def prepare_run(self) -> None:
