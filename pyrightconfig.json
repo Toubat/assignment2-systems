@@ -1,4 +1,6 @@
 {
   "extraPaths": [".triton-stubs"],
-  "reportMissingModuleSource": "none"
+  "reportMissingModuleSource": "none",
+  "reportAttributeAccessIssue": "none",
+  "reportUnreachable": "none"
 }

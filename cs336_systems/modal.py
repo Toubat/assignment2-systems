@@ -28,6 +28,7 @@ image = (
         "einops>=0.8",
         "einx>=0.4",
         "jaxtyping>=0.3",
+        "pytest>=8",
     )
     .add_local_dir(
         str(REPO_ROOT / "cs336-basics" / "cs336_basics"),
