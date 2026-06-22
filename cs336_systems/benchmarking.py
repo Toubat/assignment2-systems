@@ -4,6 +4,7 @@ import statistics
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from functools import lru_cache
+from typing import Callable
 
 import torch
 from cs336_basics.data import get_random_batch
@@ -158,6 +159,41 @@ class LinearCheckpointOp(_CheckpointBenchOp):
             num_layers=self.config.num_layers,
             group_size=self.group_size,
         )
+
+
+class WeightedSumBenchOp(BenchOp):
+    """Benchmarks a weighted-sum implementation ``fn(x, weight) -> out``.
+
+    The op is initialized with an arbitrary kernel function, so it works for
+    both the Triton kernel (``WeightedSum.apply``) and a torch reference such as
+    ``lambda x, w: (x * w).sum(-1)``. Set ``backward=True`` to time fwd+bwd.
+    """
+
+    def __init__(
+        self,
+        fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
+        rows: int,
+        d: int,
+        backward: bool = False,
+    ):
+        self.fn = fn
+        self.rows = rows
+        self.d = d
+        self.backward = backward
+
+    def setup(self) -> None:
+        self.x = torch.randn(self.rows, self.d, device=DEVICE, requires_grad=self.backward)
+        self.weight = torch.randn(self.d, device=DEVICE, requires_grad=self.backward)
+
+    def prepare_run(self) -> None:
+        if self.backward:
+            self.x.grad = None
+            self.weight.grad = None
+
+    def run(self) -> None:
+        out = self.fn(self.x, self.weight)
+        if self.backward:
+            out.sum().backward()
 
 
 def benchmark(

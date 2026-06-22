@@ -68,3 +68,35 @@ def test_weighted_sum_max_abs_diff_under_epsilon():
 
     max_abs_diff = (out - ref).abs().max().item()
     assert max_abs_diff < 1e-2, f"max abs diff too large: {max_abs_diff}"
+
+
+def _grads(apply_fn, x: torch.Tensor, weight: torch.Tensor, grad_out: torch.Tensor):
+    """Run apply_fn's forward + backward on fresh leaves, return (grad_x, grad_weight)."""
+    x = x.detach().clone().requires_grad_(True)
+    weight = weight.detach().clone().requires_grad_(True)
+    out = apply_fn(x, weight)
+    out.backward(grad_out)
+    return x.grad, weight.grad
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available(),
+    reason="A GPU must be available to run Triton kernels",
+)
+@pytest.mark.parametrize("shape", SHAPES)
+def test_weighted_sum_backward_matches_torch(shape):
+    # NOTE: requires WeightedSum.backward to be implemented.
+    # Reference grads (out = sum_d x[...,d] * weight[d]):
+    #   grad_x[...,d]   = grad_out[...] * weight[d]
+    #   grad_weight[d]  = sum over all rows of grad_out[row] * x[row, d]
+    torch.manual_seed(0)
+    *lead, d = shape
+    x = torch.randn(*lead, d, device="cuda", dtype=torch.float32)
+    weight = torch.randn(d, device="cuda", dtype=torch.float32)
+    grad_out = torch.randn(*lead, device="cuda", dtype=torch.float32)
+
+    ref_grad_x, ref_grad_w = _grads(_reference, x, weight, grad_out)
+    grad_x, grad_w = _grads(WeightedSum.apply, x, weight, grad_out)
+
+    torch.testing.assert_close(grad_x, ref_grad_x, rtol=RTOL, atol=ATOL)
+    torch.testing.assert_close(grad_w, ref_grad_w, rtol=RTOL, atol=ATOL)
