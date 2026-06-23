@@ -25,14 +25,14 @@ class FlashAttentionTorch(torch.autograd.Function):
 
         ctx.D = D_Q
         ctx.Q_TILE_SIZE = 16
-        ctx.K_TILE_SIZE = triton.next_power_of_2(D_K) // 16
+        ctx.K_TILE_SIZE = max(16, triton.next_power_of_2(k_seq_len) // 16)
 
         q_tiles = torch.split(q, ctx.Q_TILE_SIZE, dim=-2)  # (..., T_Q, D)
         k_tiles = torch.split(k, ctx.K_TILE_SIZE, dim=-2)  # (..., T_K, D)
         v_tiles = torch.split(v, ctx.K_TILE_SIZE, dim=-2)  # (..., T_V, D)
 
-        o_tiles = []
-        logsumexp_tiles = []
+        o_tiles = []  # (..., T_Q, D) -> (..., seq_len_q, D)
+        logsumexp_tiles = []  # (..., T_Q) -> (..., seq_len_q)
         for i in range(len(q_tiles)):
             q_i = q_tiles[i]  # (..., T_Q, D)
             o_i = torch.zeros_like(q_i)  # (..., T_Q, D); zeros so 0*garbage can't NaN
