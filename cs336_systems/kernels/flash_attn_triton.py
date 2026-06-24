@@ -33,6 +33,7 @@ def flash_fwd_kernel(
     D: tl.constexpr,
     Q_TILE_SIZE: tl.constexpr,
     K_TILE_SIZE: tl.constexpr,
+    IS_CAUSAL: tl.constexpr,
 ):
     q_tile_idx = tl.program_id(0)
     batch_idx = tl.program_id(1)
@@ -91,7 +92,17 @@ def flash_fwd_kernel(
     l_i = tl.zeros((Q_TILE_SIZE,), dtype=tl.float32)
     m_i = tl.full((Q_TILE_SIZE,), float("-inf"), dtype=tl.float32)
 
-    for k_tile_idx in range(tl.cdiv(N_KEYS, K_TILE_SIZE)):
+    if IS_CAUSAL:
+        q_seq_idx = tl.arange(0, Q_TILE_SIZE) + q_tile_idx * Q_TILE_SIZE
+        k_seq_idx = tl.arange(0, K_TILE_SIZE)
+        # Causal: only iterate key tiles up to the diagonal (Triton has no `break`,
+        # so bound the loop instead of breaking out of it).
+        num_k_tiles = tl.cdiv((q_tile_idx + 1) * Q_TILE_SIZE, K_TILE_SIZE)
+    else:
+        num_k_tiles = tl.cdiv(N_KEYS, K_TILE_SIZE)
+
+    for k_tile_idx in range(num_k_tiles):
+
         k_j = tl.load(
             k_block_ptr, boundary_check=(0, 1), padding_option="zero"
         )  # (K_TILE_SIZE, D)
@@ -100,6 +111,12 @@ def flash_fwd_kernel(
         )  # (K_TILE_SIZE, D)
 
         s_ij = tl.dot(q_i, tl.trans(k_j)) * scale  # (Q_TILE_SIZE, K_TILE_SIZE)
+
+        if IS_CAUSAL:
+            mask = q_seq_idx[:, None] >= k_seq_idx[None, :]
+            s_ij = tl.where(mask, s_ij, float("-inf"))
+            k_seq_idx += K_TILE_SIZE
+
         s_ij_row_max = tl.max(s_ij, axis=-1)  # (Q_TILE_SIZE,)
 
         m_i_prev, m_i = m_i, tl.maximum(m_i, s_ij_row_max)  # (Q_TILE_SIZE,)
@@ -155,6 +172,7 @@ class FlashAttention(torch.autograd.Function):
         ctx.K_TILE_SIZE = max(16, triton.next_power_of_2(k_seq_len) // 16)
         ctx.q_shape = q.shape
         ctx.k_shape = k.shape
+        ctx.is_causal = is_causal
 
         n_tiles, n_rows = triton.cdiv(ctx.N_QUERIES, ctx.Q_TILE_SIZE), q.shape[0]
 
@@ -187,6 +205,7 @@ class FlashAttention(torch.autograd.Function):
             D=ctx.D,  # type: ignore
             Q_TILE_SIZE=ctx.Q_TILE_SIZE,  # type: ignore
             K_TILE_SIZE=ctx.K_TILE_SIZE,  # type: ignore
+            IS_CAUSAL=ctx.is_causal,  # type: ignore
         )
 
         ctx.save_for_backward(logsumexp, q, k, v, o)
