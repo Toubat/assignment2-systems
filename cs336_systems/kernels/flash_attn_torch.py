@@ -91,9 +91,19 @@ def _flash_attn_backward_torch(
     d_o: torch.Tensor,
     logsumexp: torch.Tensor,
     scale: float,
+    is_causal: bool = False,
 ):
+    # Works on any leading dims; q/k/v/o are (..., seq, d), logsumexp is (..., q).
     d = torch.sum(o * d_o, dim=-1)  # (..., q)
     s = einsum(q, k, "... q d, ... k d -> ... q k") * scale  # (..., q, k)
+
+    if is_causal:
+        # Mask future keys to -inf so they recompute to P=0 (matches the causal
+        # forward, whose L already excludes them).
+        q_idx = torch.arange(s.shape[-2], device=s.device)
+        k_idx = torch.arange(s.shape[-1], device=s.device)
+        s = s.masked_fill(q_idx[:, None] < k_idx[None, :], float("-inf"))
+
     p = torch.exp(s - torch.unsqueeze(logsumexp, -1))  # (..., q, k)
 
     d_v = einsum(p, d_o, "... q k, ... q d -> ... k d")  # (..., k, d)

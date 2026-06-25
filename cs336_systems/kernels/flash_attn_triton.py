@@ -167,11 +167,9 @@ class FlashAttention(torch.autograd.Function):
         ctx.N_QUERIES = q_seq_len
         ctx.N_KEYS = k_seq_len
         ctx.Q_TILE_SIZE = 16
-
-        # tl.dot requires all matmul dims >= 16, so the key tile must be >= 16.
-        ctx.K_TILE_SIZE = max(16, triton.next_power_of_2(k_seq_len) // 16)
-        ctx.q_shape = q.shape
-        ctx.k_shape = k.shape
+        ctx.K_TILE_SIZE = max(
+            16, triton.next_power_of_2(k_seq_len) // 16
+        )  # tl.dot requires all matmul dims >= 16, so the key tile must be >= 16.
         ctx.is_causal = is_causal
 
         n_tiles, n_rows = triton.cdiv(ctx.N_QUERIES, ctx.Q_TILE_SIZE), q.shape[0]
@@ -213,4 +211,37 @@ class FlashAttention(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx: FunctionCtx, *grad_outputs: torch.Tensor):
-        raise NotImplementedError
+        logsumexp, q, k, v, o = ctx.saved_tensors  # flattened: (n_rows, seq, d)
+        d_o = grad_outputs[0]  # original shape: (*lead, q_seq, D)
+
+        d_q, d_k, d_v = _flash_attn_backward_naive(
+            logsumexp, q, k, v, o, d_o, 1 / (ctx.D**0.5), ctx.is_causal
+        )
+
+        return d_q, d_k, d_v, None
+
+
+def _flash_attn_backward_naive(
+    logsumexp: torch.Tensor,
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    o: torch.Tensor,
+    d_o: torch.Tensor,
+    scale: float,
+    is_causal: bool,
+):
+    from cs336_systems.kernels.flash_attn_torch import _flash_attn_backward_torch
+
+    lead = d_o.shape[:-2]
+    d_o_flat = d_o.reshape(o.shape)  # -> (n_rows, q_seq, D)
+
+    d_q, d_k, d_v = _flash_attn_backward_torch(
+        q, k, v, o, d_o_flat, logsumexp, scale, is_causal
+    )
+
+    d_q = d_q.reshape(*lead, *q.shape[-2:])
+    d_k = d_k.reshape(*lead, *k.shape[-2:])
+    d_v = d_v.reshape(*lead, *v.shape[-2:])
+
+    return d_q, d_k, d_v
