@@ -27,8 +27,8 @@ def _attention_and_lse(q, k, v, is_causal=False):
     return o, L
 
 
-def _make_attn_inputs(device=None, batch_size=4, n_queries=128, n_keys=128, D=64):
-    torch.random.manual_seed(0)
+def _make_attn_inputs(device=None, batch_size=4, n_queries=128, n_keys=128, D=64, seed=0):
+    torch.random.manual_seed(seed)
     q = torch.randn(batch_size, n_queries, D, device=device, requires_grad=True)
     k = torch.randn(batch_size, n_keys, D, device=device, requires_grad=True)
     v = torch.randn(batch_size, n_keys, D, device=device, requires_grad=True)
@@ -97,18 +97,21 @@ def test_flash_forward_pass_triton(is_causal, shape):
     )
 
 
-def flash_backward_results(impl, is_causal, device=None):
-    q, k, v, do = _make_attn_inputs(device=device)
+def flash_backward_results(impl, is_causal, device=None, seed=0):
+    q, k, v, do = _make_attn_inputs(device=device, seed=seed)
     impl(q, k, v, is_causal).backward(do)
     return q.grad, k.grad, v.grad
 
 
-def test_flash_backward_pytorch():
+@pytest.mark.parametrize("seed", range(10))
+def test_flash_backward_pytorch(seed):
+    # Run several deterministic random inputs to catch mistakes that a single
+    # seed can miss, while keeping failures reproducible.
     dq_expected, dk_expected, dv_expected = flash_backward_results(
-        lambda *args: _attention_and_lse(*args)[0], False
+        lambda *args: _attention_and_lse(*args)[0], False, seed=seed
     )
 
-    q, k, v, do = _make_attn_inputs()
+    q, k, v, do = _make_attn_inputs(seed=seed)
     get_flashattention_autograd_function_pytorch().apply(q, k, v, False).backward(do)
 
     torch.testing.assert_close(dq_expected, q.grad, rtol=1e-2, atol=1e-2)

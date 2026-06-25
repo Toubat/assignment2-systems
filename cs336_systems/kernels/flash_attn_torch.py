@@ -73,4 +73,34 @@ class FlashAttentionTorch(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx: FunctionCtx, *grad_outputs: torch.Tensor):
-        raise NotImplementedError
+        d_o = grad_outputs[0]  # (..., q, d)
+        logsumexp, q, k, v, o = ctx.saved_tensors
+
+        d_q, d_k, d_v = _flash_attn_backward_torch(
+            q, k, v, o, d_o, logsumexp, 1 / sqrt(ctx.D)
+        )
+        return d_q, d_k, d_v, None
+
+
+@torch.compile
+def _flash_attn_backward_torch(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    o: torch.Tensor,
+    d_o: torch.Tensor,
+    logsumexp: torch.Tensor,
+    scale: float,
+):
+    d = torch.sum(o * d_o, dim=-1)  # (..., q)
+    s = einsum(q, k, "... q d, ... k d -> ... q k") * scale  # (..., q, k)
+    p = torch.exp(s - torch.unsqueeze(logsumexp, -1))  # (..., q, k)
+
+    d_v = einsum(p, d_o, "... q k, ... q d -> ... k d")  # (..., k, d)
+    d_p = einsum(d_o, v, "... q d, ... k d -> ... q k")  # (..., q, k)
+    d_s = p * (d_p - torch.unsqueeze(d, -1))  # (..., q, k)
+
+    d_q = einsum(d_s, k, "... q k, ... k d -> ... q d") * scale  # (..., q, d)
+    d_k = einsum(d_s, q, "... q k, ... q d -> ... k d") * scale  # (..., k, d)
+
+    return d_q, d_k, d_v
