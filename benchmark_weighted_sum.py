@@ -102,11 +102,33 @@ def _format(results: list[dict]) -> str:
     )
 
 
+def _save_charts(results: list[dict]):
+    from cs336_systems.plots import grouped_bar_chart
+
+    rs = sorted(results, key=lambda r: r["rows"] * r["d"])
+    cats = [f"{r['rows']}x{r['d']}" for r in rs]
+    groups = {
+        "triton fwd": [r["triton_fwd"] for r in rs],
+        "torch fwd": [r["torch_fwd"] for r in rs],
+        "triton f+b": [r["triton_fwdbwd"] for r in rs],
+        "torch f+b": [r["torch_fwdbwd"] for r in rs],
+    }
+    grouped_bar_chart(
+        "weighted_sum.png",
+        "weighted_sum: Triton vs torch",
+        "config (rows x D)",
+        "latency (ms)",
+        cats,
+        groups,
+    )
+
+
 @app.local_entrypoint()
 def main(num_warmups: int = 10, num_trials: int = 100):
     results = run.remote(num_warmups, num_trials)
     print()
     print(_format(results))
+    _save_charts(results)
 
 
 """

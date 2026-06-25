@@ -220,6 +220,42 @@ def _write_snapshots(
     return written
 
 
+def _op_means(results: dict, op: str) -> list:
+    return [((results.get(s["name"]) or {}).get(op) or {}).get("mean") for s in MODEL_SIZES]
+
+
+def _save_precision_charts(fp32_results: dict, bf16_results: dict):
+    from cs336_systems.plots import grouped_bar_chart
+
+    cats = [s["name"] for s in MODEL_SIZES]
+    for results, prec in ((fp32_results, "fp32"), (bf16_results, "bf16")):
+        grouped_bar_chart(
+            f"lm_{prec}.png",
+            f"Transformer LM latency ({prec})",
+            "model size",
+            "ms/step",
+            cats,
+            {op: _op_means(results, op) for op in OP_NAMES},
+        )
+
+
+def _save_compile_chart(vanilla_results: dict, compiled_results: dict):
+    from cs336_systems.plots import grouped_bar_chart
+
+    cats = [s["name"] for s in MODEL_SIZES]
+    grouped_bar_chart(
+        "lm_compile.png",
+        "LM forward+backward: vanilla vs torch.compile (fp32)",
+        "model size",
+        "ms/step",
+        cats,
+        {
+            "vanilla": _op_means(vanilla_results, "forward_backward"),
+            "compiled": _op_means(compiled_results, "forward_backward"),
+        },
+    )
+
+
 @app.local_entrypoint()
 def main(
     vocab_size: int = 10000,
@@ -253,6 +289,7 @@ def main(
         print(_format_table(_results_only(vanilla), num_trials))
         print("\n### torch.compile (fp32) ###")
         print(_format_table(_results_only(compiled), num_trials))
+        _save_compile_chart(_results_only(vanilla), _results_only(compiled))
         return
 
     # Spawn BOTH sweeps first (all 10 containers launch), then gather — so fp32
@@ -271,6 +308,7 @@ def main(
     print(_format_table(_results_only(fp32), num_trials))
     print("\n### MIXED PRECISION (bf16 autocast) ###")
     print(_format_table(_results_only(bf16), num_trials))
+    _save_precision_charts(_results_only(fp32), _results_only(bf16))
 
     if profile_memory:
         print(

@@ -192,6 +192,39 @@ def main(num_warmups: int = 3, num_trials: int = 10, autocast_bfloat16: bool = T
 
     print()
     print(_format_table(results, num_trials, autocast_bfloat16))
+    _save_charts(results, autocast_bfloat16)
+
+
+def _save_charts(results: list[dict], autocast_bfloat16: bool):
+    from cs336_systems.plots import grid_line_chart
+
+    def mib(b):
+        return None if b is None else b / (1024**2)
+
+    lin = sorted(
+        [r for r in results if r["strategy"] == "linear"], key=lambda r: r["group_size"]
+    )
+    rec = next((r for r in results if r["strategy"] == "recursive"), None)
+    gs = [r["group_size"] for r in lin]
+
+    peak_series = {"linear": (gs, [mib(r["peak_bytes"]) for r in lin])}
+    time_series = {"linear": (gs, [r["mean"] for r in lin])}
+    if rec is not None:
+        peak_series["recursive (ref)"] = (gs, [mib(rec["peak_bytes"])] * len(gs))
+        time_series["recursive (ref)"] = (gs, [rec["mean"]] * len(gs))
+
+    prec = "bf16" if autocast_bfloat16 else "fp32"
+    grid_line_chart(
+        f"checkpoint_{prec}.png",
+        f"Gradient checkpointing ({prec}): peak memory & step time vs group size",
+        [
+            {"title": "Peak memory", "xlabel": "group size", "ylabel": "MiB", "series": peak_series},
+            {"title": "Step time", "xlabel": "group size", "ylabel": "ms", "series": time_series},
+        ],
+        ncols=2,
+        logx=True,
+        logy=False,
+    )
 
 
 """

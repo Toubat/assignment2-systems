@@ -137,7 +137,8 @@ def flash_fwd_kernel(
     o_i = o_i / l_i[:, None]
     logsumexp_i = m_i + tl.log(l_i)
 
-    tl.store(o_block_ptr, o_i, boundary_check=(0, 1))
+    # Cast the fp32 accumulator down to the output buffer's dtype (e.g. bf16).
+    tl.store(o_block_ptr, o_i.to(o_block_ptr.type.element_ty), boundary_check=(0, 1))
     tl.store(logsumexp_block_ptr, logsumexp_i, boundary_check=(0,))
 
 
@@ -167,15 +168,18 @@ class FlashAttention(torch.autograd.Function):
         ctx.N_QUERIES = q_seq_len
         ctx.N_KEYS = k_seq_len
         ctx.Q_TILE_SIZE = 16
-        ctx.K_TILE_SIZE = max(
-            16, triton.next_power_of_2(k_seq_len) // 16
-        )  # tl.dot requires all matmul dims >= 16, so the key tile must be >= 16.
+        # tl.dot needs all matmul dims >= 16, so the key tile must be >= 16; cap it
+        # so long sequences don't produce huge tiles that overflow SRAM.
+        ctx.K_TILE_SIZE = min(64, max(16, triton.next_power_of_2(k_seq_len) // 16))
         ctx.is_causal = is_causal
 
         n_tiles, n_rows = triton.cdiv(ctx.N_QUERIES, ctx.Q_TILE_SIZE), q.shape[0]
 
         o = torch.empty((n_rows, q_seq_len, ctx.D), device=q.device, dtype=q.dtype)
-        logsumexp = torch.empty((n_rows, q_seq_len), device=q.device, dtype=q.dtype)
+        # logsumexp kept in fp32 (it's O(N) and used for the backward recompute).
+        logsumexp = torch.empty(
+            (n_rows, q_seq_len), device=q.device, dtype=torch.float32
+        )
 
         flash_fwd_kernel[(n_tiles, n_rows)](
             q,

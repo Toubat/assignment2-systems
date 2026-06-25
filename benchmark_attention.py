@@ -186,6 +186,38 @@ def main(num_warmups: int = 10, num_trials: int = 100):
 
     print()
     print(_format_table(gathered))
+    _save_charts(gathered)
+
+
+def _save_charts(gathered: dict):
+    from cs336_systems.plots import grid_line_chart
+
+    def num(v):
+        return v if isinstance(v, (int, float)) else None
+
+    panels = []
+    for d_model in D_MODELS:
+        eager = gathered.get((False, d_model), {})
+        comp = gathered.get((True, d_model), {})
+        panels.append({
+            "title": f"d_model={d_model}",
+            "xlabel": "seq_len",
+            "ylabel": "latency (ms)",
+            "series": {
+                "fwd eager": (SEQ_LENS, [num(eager.get(s, {}).get("fwd")) for s in SEQ_LENS]),
+                "fwd compiled": (SEQ_LENS, [num(comp.get(s, {}).get("fwd")) for s in SEQ_LENS]),
+                "bwd eager": (SEQ_LENS, [num(eager.get(s, {}).get("bwd")) for s in SEQ_LENS]),
+                "bwd compiled": (SEQ_LENS, [num(comp.get(s, {}).get("bwd")) for s in SEQ_LENS]),
+            },
+        })
+    grid_line_chart(
+        "attention.png",
+        f"Attention: eager vs torch.compile (batch={BATCH}, single-head)",
+        panels,
+        ncols=2,
+        logx=True,
+        logy=True,
+    )
 
 
 """

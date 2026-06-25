@@ -105,6 +105,9 @@ def _flash_attn_backward_torch(
         s = s.masked_fill(q_idx[:, None] < k_idx[None, :], float("-inf"))
 
     p = torch.exp(s - torch.unsqueeze(logsumexp, -1))  # (..., q, k)
+    # logsumexp is fp32, so p promoted to fp32; cast back so the einsums below
+    # stay dtype-consistent with q/k/v/d_o (e.g. bf16).
+    p = p.to(q.dtype)
 
     d_v = einsum(p, d_o, "... q k, ... q d -> ... k d")  # (..., k, d)
     d_p = einsum(d_o, v, "... q d, ... k d -> ... q k")  # (..., q, k)
