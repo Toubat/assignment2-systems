@@ -7,6 +7,7 @@ from functools import lru_cache
 from typing import Callable
 
 import torch
+from torch import nn
 from cs336_basics.data import get_random_batch
 from cs336_basics.model import BasicsTransformerLM, RotaryEmbedding, TransformerBlock
 from cs336_basics.nn_utils import cross_entropy
@@ -81,7 +82,9 @@ class BackwardOp(BenchOp):
 
 
 class ForwardBackwardOp(BenchOp):
-    def __init__(self, config: LMConfig, with_optimizer: bool = True, compile_model: bool = False):
+    def __init__(
+        self, config: LMConfig, with_optimizer: bool = True, compile_model: bool = False
+    ):
         self.config = config
         self.with_optimizer = with_optimizer
         self.compile_model = compile_model
@@ -182,7 +185,9 @@ class WeightedSumBenchOp(BenchOp):
         self.backward = backward
 
     def setup(self) -> None:
-        self.x = torch.randn(self.rows, self.d, device=DEVICE, requires_grad=self.backward)
+        self.x = torch.randn(
+            self.rows, self.d, device=DEVICE, requires_grad=self.backward
+        )
         self.weight = torch.randn(self.d, device=DEVICE, requires_grad=self.backward)
 
     def prepare_run(self) -> None:

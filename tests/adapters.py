@@ -1,10 +1,18 @@
 from __future__ import annotations
+import os
 import torch
+from typing import cast
+
 
 from cs336_systems.kernels import FlashAttentionTorch
 from cs336_systems.kernels.flash_attn_triton import (
     FlashAttention as FlashAttentionTriton,
 )
+from cs336_systems.dist import DDP, NaiveDDP
+from cs336_systems.dist.ddp import BaseDDP
+
+# Select which DDP implementation get_ddp returns: overlap (default), naive, flat.
+DDP_IMPL = os.environ.get("DDP_IMPL", "overlap")
 
 
 def get_flashattention_autograd_function_pytorch() -> type:
@@ -51,8 +59,11 @@ def get_ddp(module: torch.nn.Module) -> torch.nn.Module:
     Returns:
         Instance of a DDP class.
     """
-    # For example: return DDP(module)
-    raise NotImplementedError
+    if DDP_IMPL == "naive":
+        return NaiveDDP(module, batch_all_reduce=False)
+    if DDP_IMPL == "flat":
+        return NaiveDDP(module, batch_all_reduce=True)
+    return DDP(module)
 
 
 def ddp_on_after_backward(ddp_model: torch.nn.Module, optimizer: torch.optim.Optimizer):
@@ -66,8 +77,7 @@ def ddp_on_after_backward(ddp_model: torch.nn.Module, optimizer: torch.optim.Opt
         optimizer: torch.optim.Optimizer
             Optimizer being used with the DDP-wrapped model.
     """
-    # For example: ddp_model.finish_gradient_synchronization()
-    raise NotImplementedError
+    cast(BaseDDP, ddp_model).finish_gradient_synchronization()
 
 
 def get_fsdp(
