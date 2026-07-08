@@ -28,7 +28,7 @@ def linear_checkpoint(
 
 def recursive_checkpoint(
     fn: Callable[[torch.Tensor], torch.Tensor], x: torch.Tensor, num_layers: int
-):
+) -> torch.Tensor:
 
     def recurse(x: torch.Tensor, start: int, end: int):
         if start == end:
@@ -42,12 +42,12 @@ def recursive_checkpoint(
         def run_right(x: torch.Tensor):
             return recurse(x, mid + 1, end)
 
-        x = checkpoint(run_left, x, use_reentrant=False)
-        x = checkpoint(run_right, x, use_reentrant=False)
+        x = checkpoint(run_left, x, use_reentrant=False)  # type: ignore
+        x = checkpoint(run_right, x, use_reentrant=False)  # type: ignore
 
         return x
 
     def run_all(x: torch.Tensor):
         return recurse(x, 0, num_layers - 1)
 
-    return checkpoint(run_all, x, use_reentrant=False)
+    return checkpoint(run_all, x, use_reentrant=False)  # type: ignore

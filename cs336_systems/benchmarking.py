@@ -59,7 +59,7 @@ class ForwardOp(BenchOp):
         self.input, _ = sample_one(self.config)
 
     def run(self) -> None:
-        self.lm.forward(self.input)
+        self.lm(self.input)
 
 
 class BackwardOp(BenchOp):
@@ -71,13 +71,13 @@ class BackwardOp(BenchOp):
         self.lm = get_transformer_lm(self.config)
         if self.compile_model:
             self.lm = torch.compile(self.lm)
-        self.optimizer = AdamW(self.lm.parameters(), lr=1e-3)
+        self.optimizer = AdamW(self.lm.parameters(), lr=1e-3)  # type: ignore
 
     def prepare_run(self) -> None:
         self.optimizer.zero_grad()
 
         inputs, targets = sample_one(self.config)
-        logits = self.lm.forward(inputs)
+        logits = self.lm(inputs)
         self.loss = cross_entropy(logits, targets)
 
     def run(self) -> None:
@@ -85,7 +85,9 @@ class BackwardOp(BenchOp):
 
 
 class ForwardBackwardOp(BenchOp):
-    def __init__(self, config: LMConfig, with_optimizer: bool = True, compile_model: bool = False):
+    def __init__(
+        self, config: LMConfig, with_optimizer: bool = True, compile_model: bool = False
+    ):
         self.config = config
         self.with_optimizer = with_optimizer
         self.compile_model = compile_model
@@ -94,14 +96,14 @@ class ForwardBackwardOp(BenchOp):
         self.lm = get_transformer_lm(self.config)
         if self.compile_model:
             self.lm = torch.compile(self.lm)
-        self.optimizer = AdamW(self.lm.parameters(), lr=1e-3)
+        self.optimizer = AdamW(self.lm.parameters(), lr=1e-3)  # type: ignore
 
     def prepare_run(self) -> None:
         self.optimizer.zero_grad()
         self.inputs, self.targets = sample_one(self.config)
 
     def run(self) -> None:
-        logits = self.lm.forward(self.inputs)
+        logits = self.lm(self.inputs)
         loss = cross_entropy(logits, self.targets)
         loss.backward()
 
@@ -186,7 +188,9 @@ class WeightedSumBenchOp(BenchOp):
         self.backward = backward
 
     def setup(self) -> None:
-        self.x = torch.randn(self.rows, self.d, device=DEVICE, requires_grad=self.backward)
+        self.x = torch.randn(
+            self.rows, self.d, device=DEVICE, requires_grad=self.backward
+        )
         self.weight = torch.randn(self.d, device=DEVICE, requires_grad=self.backward)
 
     def prepare_run(self) -> None:
@@ -217,7 +221,11 @@ def benchmark(
 
     op.setup()
 
-    ctx = torch.autocast(device_type="cuda", dtype=torch.bfloat16) if autocast_bfloat16 else nullcontext()
+    ctx = (
+        torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+        if autocast_bfloat16
+        else nullcontext()
+    )
 
     start_event = torch.cuda.Event(enable_timing=True)
     stop_event = torch.cuda.Event(enable_timing=True)
@@ -271,8 +279,12 @@ def get_transformer_lm(config: LMConfig) -> BasicsTransformerLM:
 
 
 @lru_cache
-def batch_input(vocab_size: int, context_length: int) -> tuple[torch.Tensor, torch.Tensor]:
-    print(f"Getting batch input for vocab size {vocab_size} and context length {context_length}")
+def batch_input(
+    vocab_size: int, context_length: int
+) -> tuple[torch.Tensor, torch.Tensor]:
+    print(
+        f"Getting batch input for vocab size {vocab_size} and context length {context_length}"
+    )
     X, y = get_random_batch(
         dataset_size=10000,
         vocab_size=vocab_size,
@@ -359,7 +371,9 @@ def benchmark_parallel_training(
     """
     assert dist.is_initialized(), "requires an initialized process group"
     world_size = dist.get_world_size()
-    assert global_batch_size % world_size == 0, f"world_size={world_size} must divide global_batch_size={global_batch_size}"
+    assert (
+        global_batch_size % world_size == 0
+    ), f"world_size={world_size} must divide global_batch_size={global_batch_size}"
     local_batch_size = global_batch_size // world_size
 
     model = wrap_model(get_transformer_lm(config))
