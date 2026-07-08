@@ -1,17 +1,20 @@
-from contextlib import nullcontext
 import random
 import statistics
+import timeit
 from abc import ABC, abstractmethod
+from collections.abc import Callable, Iterable
+from contextlib import nullcontext
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Callable
 
 import torch
-from torch import nn
+import torch.distributed as dist
 from cs336_basics.data import get_random_batch
 from cs336_basics.model import BasicsTransformerLM, RotaryEmbedding, TransformerBlock
 from cs336_basics.nn_utils import cross_entropy
 from cs336_basics.optimizer import AdamW
+from torch import nn
+from torch.optim import Optimizer
 
 from cs336_systems.gradient_checkpoint import linear_checkpoint, recursive_checkpoint
 
@@ -82,9 +85,7 @@ class BackwardOp(BenchOp):
 
 
 class ForwardBackwardOp(BenchOp):
-    def __init__(
-        self, config: LMConfig, with_optimizer: bool = True, compile_model: bool = False
-    ):
+    def __init__(self, config: LMConfig, with_optimizer: bool = True, compile_model: bool = False):
         self.config = config
         self.with_optimizer = with_optimizer
         self.compile_model = compile_model
@@ -185,9 +186,7 @@ class WeightedSumBenchOp(BenchOp):
         self.backward = backward
 
     def setup(self) -> None:
-        self.x = torch.randn(
-            self.rows, self.d, device=DEVICE, requires_grad=self.backward
-        )
+        self.x = torch.randn(self.rows, self.d, device=DEVICE, requires_grad=self.backward)
         self.weight = torch.randn(self.d, device=DEVICE, requires_grad=self.backward)
 
     def prepare_run(self) -> None:
@@ -218,11 +217,7 @@ def benchmark(
 
     op.setup()
 
-    ctx = (
-        torch.autocast(device_type="cuda", dtype=torch.bfloat16)
-        if autocast_bfloat16
-        else nullcontext()
-    )
+    ctx = torch.autocast(device_type="cuda", dtype=torch.bfloat16) if autocast_bfloat16 else nullcontext()
 
     start_event = torch.cuda.Event(enable_timing=True)
     stop_event = torch.cuda.Event(enable_timing=True)
@@ -276,12 +271,8 @@ def get_transformer_lm(config: LMConfig) -> BasicsTransformerLM:
 
 
 @lru_cache
-def batch_input(
-    vocab_size: int, context_length: int
-) -> tuple[torch.Tensor, torch.Tensor]:
-    print(
-        f"Getting batch input for vocab size {vocab_size} and context length {context_length}"
-    )
+def batch_input(vocab_size: int, context_length: int) -> tuple[torch.Tensor, torch.Tensor]:
+    print(f"Getting batch input for vocab size {vocab_size} and context length {context_length}")
     X, y = get_random_batch(
         dataset_size=10000,
         vocab_size=vocab_size,
@@ -299,3 +290,125 @@ def sample_one(config: LMConfig) -> tuple[torch.Tensor, torch.Tensor]:
     # randomly sample a single input from the batch
     idx = random.randint(0, X.shape[0] - 1)
     return X[idx].unsqueeze(0), y[idx].unsqueeze(0)
+
+
+def dist_train_step(
+    model: nn.Module,
+    optimizer: Optimizer,
+    inputs: torch.Tensor,
+    targets: torch.Tensor,
+) -> tuple[float, float]:
+    """Run one distributed training step and return ``(step_ms, comm_ms)``.
+
+    ``comm_ms`` is the wall time spent in ``finish_gradient_synchronization()``,
+    i.e. the gradient-communication cost that is NOT overlapped with the
+    backward pass:
+
+    - naive/flat DDP: all all-reduces happen there, so it is the full comm time.
+    - overlapped DDP: only the residual wait on in-flight all-reduces.
+
+    Before timing the comm window we synchronize the *compute* stream only
+    (``torch.cuda.current_stream()``), so async NCCL work launched during
+    backward keeps running and is correctly attributed to the comm window.
+    Works with any wrapper exposing ``finish_gradient_synchronization``
+    (DDP today, FSDP later); plain modules report 0 comm time.
+    """
+    timer = timeit.default_timer
+
+    step_start = timer()
+
+    optimizer.zero_grad()
+    logits = model(inputs)
+    loss = cross_entropy(logits, targets)
+    loss.backward()
+
+    # Wait for backward *compute* only; async NCCL streams keep running.
+    torch.cuda.current_stream().synchronize()
+    comm_start = timer()
+
+    finish = getattr(model, "finish_gradient_synchronization", None)
+    if finish is not None:
+        finish()
+    # Wait for all streams (incl. NCCL) so grads are final.
+    torch.cuda.synchronize()
+    comm_stop = timer()
+
+    optimizer.step()
+    torch.cuda.synchronize()
+    step_stop = timer()
+
+    return (step_stop - step_start) * 1e3, (comm_stop - comm_start) * 1e3
+
+
+def benchmark_parallel_training(
+    config: LMConfig,
+    wrap_model: Callable[[nn.Module], nn.Module],
+    make_optimizer: Callable[[Iterable[nn.Parameter]], Optimizer] | None = None,
+    global_batch_size: int = 4,
+    num_warmups: int = 5,
+    num_trials: int = 20,
+) -> dict[str, float]:
+    """Benchmark one rank of data-parallel training. Call from every rank.
+
+    Requires an initialized process group (the caller spawns workers and calls
+    ``dist.init_process_group``). Builds the LM, wraps it with ``wrap_model``
+    (DDP variant / FSDP / identity), builds the optimizer via ``make_optimizer``
+    (pluggable so a sharded optimizer can be benchmarked later), and times
+    ``num_trials`` training steps on a ``global_batch_size / world_size`` local
+    batch. Returns stats (ms) averaged across ranks.
+    """
+    assert dist.is_initialized(), "requires an initialized process group"
+    world_size = dist.get_world_size()
+    assert global_batch_size % world_size == 0, f"world_size={world_size} must divide global_batch_size={global_batch_size}"
+    local_batch_size = global_batch_size // world_size
+
+    model = wrap_model(get_transformer_lm(config))
+    if make_optimizer is None:
+        make_optimizer = lambda params: AdamW(params, lr=1e-3)  # noqa: E731
+    optimizer = make_optimizer(model.parameters())
+
+    def sample_local_batch() -> tuple[torch.Tensor, torch.Tensor]:
+        return get_random_batch(
+            dataset_size=10000,
+            vocab_size=config.vocab_size,
+            batch_size=local_batch_size,
+            context_length=config.context_length,
+            device=DEVICE,
+        )
+
+    step_times: list[float] = []
+    comm_times: list[float] = []
+
+    for i in range(num_warmups + num_trials):
+        inputs, targets = sample_local_batch()
+
+        # Align ranks so we measure the step, not stragglers.
+        dist.barrier()
+        torch.cuda.synchronize()
+
+        step_ms, comm_ms = dist_train_step(model, optimizer, inputs, targets)
+        if i >= num_warmups:
+            step_times.append(step_ms)
+            comm_times.append(comm_ms)
+
+    stats = torch.tensor(
+        [
+            statistics.mean(step_times),
+            statistics.stdev(step_times),
+            statistics.mean(comm_times),
+            statistics.stdev(comm_times),
+        ],
+        device=DEVICE,
+    )
+    # Average the per-rank stats so the result reflects all ranks.
+    dist.all_reduce(stats)
+    stats /= world_size
+
+    step_mean, step_std, comm_mean, comm_std = stats.tolist()
+    return {
+        "step_ms_mean": step_mean,
+        "step_ms_std": step_std,
+        "comm_ms_mean": comm_mean,
+        "comm_ms_std": comm_std,
+        "comm_fraction": comm_mean / step_mean if step_mean else 0.0,
+    }
