@@ -1,0 +1,46 @@
+{
+  "cli_version": "0.7.7",
+  "checkpoint_id": "3147b109b71d",
+  "session_id": "4d674a2a-eb3e-4a1a-a0bd-23ce2686b277",
+  "strategy": "manual-commit",
+  "created_at": "2026-07-08T06:03:19.96638Z",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "save_step_count": 1,
+  "files_touched": [],
+  "agent": "Cursor",
+  "model": "claude-fable-5-thinking-high",
+  "turn_id": "e214249dfc02",
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 431,
+      "user_lines_removed": 35,
+      "agent_lines_added": 57,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        "charts/allreduce_single_node.json": 56,
+        "ddp-primitives.md": 144,
+        "dist_example.py": 131,
+        "learning-ddp-primitives.md": 24,
+        "test.ipynb": 12,
+        "tests/adapters.py": 5,
+        "tmp/ddp_smoke.py": 59
+      },
+      "user_removed_per_file": {
+        "dist_example.py": 31,
+        "tests/adapters.py": 4
+      }
+    }
+  ]
+}

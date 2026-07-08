@@ -1,0 +1,1 @@
+make a dist_example.py modal to run this with 4 L4 gpu
