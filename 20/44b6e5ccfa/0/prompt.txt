@@ -1,0 +1,88 @@
+make a dist_example.py modal to run this with 4 L4 gpu
+
+---
+
+For the code present, we get this error:
+```
+"spawn" is not exported from module "torch.multiprocessing"
+```
+Fix it, verify, and then give a concise explanation. @dist_example.py:46-49
+
+---
+
+what is the size of @test.ipynb (1-5)
+
+---
+
+@test.ipynb (2-3)
+
+---
+
+complete this by modifying @dist_example.py . Utilizing @cs336_systems/benchmarking.py for warmup
+
+---
+
+so why not more gpu -> faster?
+
+---
+
+why 2 (n - 1) / n? Explain
+
+---
+
+@adapters.py (37-55) the requirement are very abstract. What primitive needed to get this? From my understanding, this requires when calling loss.backward(), it is able to accumulate gradient automatically. I don't know what hooks / overrides methods in base class that can allow me to drive this. Without telling me how to implement, teach me what primitives should I use
+
+/learn-from-session
+
+---
+
+but I do want to sync buffer as well, for my learning purpose. what method/hook to register for thing like on_before_module_forward, or on_before_tensor_forward, etc
+
+---
+
+generate me a doc of out convo, with the primitives needed. No impl details, just what each primitive's input, output, description, etc
+
+---
+
+re-format
+
+---
+
+@cs336_systems/dist/ddp.py review my code
+
+---
+
+how about now? And q: @ddp.py (32-33) do I need to do this in-place?
+
+---
+
+@main.py Now run unit test in modal
+
+---
+
+what's special of self.module, is this a reserved?
+
+---
+
+I think we implemented the wrong question.... For naive_ddp, we should not implement the optimized version no?
+
+---
+
+I think we implemented the wrong question.... For naive_ddp, we should not implement the optimized version no? Check my code now @cs336_systems/dist/ddp.py
+
+---
+
+I think we implemented the wrong question.... For naive_ddp, we should not implement the optimized version no? Check my code now @cs336_systems/dist/ddp.py Read @cs336_assignment2_systems.pdf page 33 - 36
+
+---
+
+fix for me, and test all three impl on modal
+
+---
+
+For the code present, we get this error:
+```
+Cannot access attribute "barrier" for class "FunctionType"
+  Attribute "barrier" is unknown
+```
+Fix it, verify, and then give a concise explanation. @cs336_systems/benchmarking.py:344-346
