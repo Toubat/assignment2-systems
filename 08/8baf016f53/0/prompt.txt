@@ -1,0 +1,71 @@
+Read @cs336_assignment2_systems.pdf 37 - 38.
+
+Tell me what these method does for me to understand the context of doing optimizer state sharding, without telling what code to fill out @cs336_systems/dist/optim.py 
+
+essentially educational and guiding w/o direct showing the answer
+
+---
+
+things to note / pay attention to
+
+---
+
+What is restart exactly???
+
+---
+
+ok got it
+
+---
+
+continue?
+
+---
+
+>Every rank must call every broadcast in the same order. Even ranks that do not own a parameter must participate as receivers. If ranks disagree on ordering or ownership, collectives can hang or copy the wrong tensor.
+
+Say if rank 0 -> rank 1, 2, ... n
+
+every rank must have a line of dist.broadcast(..., src=0)?
+
+---
+
+so in the wrapper i basically need to preserve the params so later on I can re-iterate it
+
+---
+
+@cs336_systems/dist/optim.py:23 what exactly is the type of Any?
+
+Can I initialize inner optimizer with [] params and in add_param_group, I conditionally call self.optimizer.add_param_group if the pram should be assigned to the corresponding rank?
+
+---
+
+how to get the rank index?
+
+---
+
+@cs336_systems/dist/optim.py review my current impl
+
+---
+
+how to support zero_grad?
+
+---
+
+so add to self.param_groups or what>?
+
+---
+
+now re-review
+
+---
+
+do adaptor for me. what is state_dict for? Do I need override? review ow
+
+---
+
+review now
+
+---
+
+commit and push

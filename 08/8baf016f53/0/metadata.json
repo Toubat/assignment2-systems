@@ -1,0 +1,47 @@
+{
+  "cli_version": "0.7.7",
+  "checkpoint_id": "088baf016f53",
+  "session_id": "4d674a2a-eb3e-4a1a-a0bd-23ce2686b277",
+  "strategy": "manual-commit",
+  "created_at": "2026-07-13T23:14:12.699939Z",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "tests/adapters.py"
+  ],
+  "agent": "Cursor",
+  "model": "claude-fable-5-thinking-high",
+  "turn_id": "2af4b3e44598",
+  "checkpoint_transcript_start": 126,
+  "transcript_lines_at_start": 126,
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-07-13T23:14:12.693126Z",
+    "agent_lines": 0,
+    "agent_removed": 0,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 2,
+    "total_committed": 0,
+    "total_lines_changed": 2,
+    "agent_percentage": 0,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 2,
+      "user_lines_removed": 2,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        "tests/adapters.py": 2
+      },
+      "user_removed_per_file": {
+        "tests/adapters.py": 2
+      }
+    }
+  ]
+}
