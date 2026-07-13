@@ -8,7 +8,7 @@ from cs336_systems.kernels import FlashAttentionTorch
 from cs336_systems.kernels.flash_attn_triton import (
     FlashAttention as FlashAttentionTriton,
 )
-from cs336_systems.dist import DDP, NaiveDDP
+from cs336_systems.dist import DDP, NaiveDDP, ShardedOptimizer
 from cs336_systems.dist.ddp import BaseDDP
 
 # Select which DDP implementation get_ddp returns: overlap (default), naive, flat.
@@ -150,4 +150,4 @@ def get_sharded_optimizer(
     Returns:
         Instance of sharded optimizer.
     """
-    raise NotImplementedError
+    return ShardedOptimizer(params, optimizer_cls, **kwargs)
