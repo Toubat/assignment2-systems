@@ -1,0 +1,59 @@
+{
+  "cli_version": "0.7.7",
+  "checkpoint_id": "43613f113ff0",
+  "session_id": "4d674a2a-eb3e-4a1a-a0bd-23ce2686b277",
+  "strategy": "manual-commit",
+  "created_at": "2026-07-14T17:09:26.297494Z",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "benchmark_optimizer_state.py",
+    "charts/optimizer_state_sharding_small_ws2.json",
+    "charts/optimizer_state_sharding_small_ws2_memory.png",
+    "charts/optimizer_state_sharding_small_ws2_speed.png",
+    "charts/optimizer_state_sharding_xl_ws2.json",
+    "charts/optimizer_state_sharding_xl_ws2_memory.png",
+    "charts/optimizer_state_sharding_xl_ws2_speed.png",
+    "cs336_systems/benchmarking.py",
+    "tests/test_benchmarking_memory.py"
+  ],
+  "agent": "Cursor",
+  "model": "claude-fable-5-thinking-high",
+  "turn_id": "84eb90e7a0e3",
+  "checkpoint_transcript_start": 193,
+  "transcript_lines_at_start": 193,
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-07-14T17:09:26.28947Z",
+    "agent_lines": 0,
+    "agent_removed": 0,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 6,
+    "total_committed": 0,
+    "total_lines_changed": 6,
+    "agent_percentage": 0,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 607,
+      "user_lines_removed": 6,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        "benchmark_optimizer_state.py": 273,
+        "charts/optimizer_state_sharding_small_ws2.json": 52,
+        "charts/optimizer_state_sharding_xl_ws2.json": 52,
+        "cs336_systems/benchmarking.py": 116,
+        "tests/test_benchmarking_memory.py": 114
+      },
+      "user_removed_per_file": {
+        "cs336_systems/benchmarking.py": 6
+      }
+    }
+  ]
+}

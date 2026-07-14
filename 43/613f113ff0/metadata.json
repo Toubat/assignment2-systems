@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.7.7",
+  "checkpoint_id": "43613f113ff0",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "benchmark_optimizer_state.py",
+    "charts/optimizer_state_sharding_small_ws2.json",
+    "charts/optimizer_state_sharding_small_ws2_memory.png",
+    "charts/optimizer_state_sharding_small_ws2_speed.png",
+    "charts/optimizer_state_sharding_xl_ws2.json",
+    "charts/optimizer_state_sharding_xl_ws2_memory.png",
+    "charts/optimizer_state_sharding_xl_ws2_speed.png",
+    "cs336_systems/benchmarking.py",
+    "tests/test_benchmarking_memory.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/43/613f113ff0/0/metadata.json",
+      "transcript": "/43/613f113ff0/0/full.jsonl",
+      "content_hash": "/43/613f113ff0/0/content_hash.txt",
+      "prompt": "/43/613f113ff0/0/prompt.txt"
+    }
+  ]
+}

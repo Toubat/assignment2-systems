@@ -1,0 +1,33 @@
+@cs336_systems/benchmarking.py Improve benchmark_parallel_training so we can do a)
+
+---
+
+Can't you do something like this?
+
+---
+
+@cs336_systems/benchmarking.py:449-474 no, you should not just profile a single step!
+
+---
+
+now create a benchmark modal file for a
+
+---
+
+do b) with chart
+
+---
+
+I@charts did not see it!
+
+---
+
+We need these metrics, but chart only shows one@charts/optimizer_state_sharding_small_ws2_speed.png
+
+---
+
+Can you answer a b and c
+
+---
+
+commit
