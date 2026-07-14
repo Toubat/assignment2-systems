@@ -304,11 +304,57 @@ def sample_one(config: LMConfig) -> tuple[torch.Tensor, torch.Tensor]:
     return X[idx].unsqueeze(0), y[idx].unsqueeze(0)
 
 
+def _nested_tensor_bytes(value: object) -> int:
+    if isinstance(value, torch.Tensor):
+        return value.numel() * value.element_size()
+    if isinstance(value, dict):
+        return sum(_nested_tensor_bytes(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return sum(_nested_tensor_bytes(item) for item in value)
+    return 0
+
+
+def _training_memory_components(model: nn.Module, optimizer: object) -> dict[str, int]:
+    """Return live tensor bytes attributable to model, gradients, and optimizer.
+
+    Optimizer wrappers such as ``ShardedOptimizer`` keep their real state on an
+    inner ``optimizer`` object, so follow that link when the outer state is
+    empty. Non-tensor metadata such as Python integer step counters is ignored.
+    """
+    parameter_bytes = sum(
+        parameter.numel() * parameter.element_size() for parameter in model.parameters()
+    )
+    gradient_bytes = sum(
+        parameter.grad.numel() * parameter.grad.element_size()
+        for parameter in model.parameters()
+        if parameter.grad is not None
+    )
+
+    state = getattr(optimizer, "state", None)
+    seen: set[int] = set()
+    while not state:
+        if id(optimizer) in seen:
+            break
+        seen.add(id(optimizer))
+        inner_optimizer = getattr(optimizer, "optimizer", None)
+        if inner_optimizer is None:
+            break
+        optimizer = inner_optimizer
+        state = getattr(optimizer, "state", None)
+
+    return {
+        "parameter_bytes": parameter_bytes,
+        "gradient_bytes": gradient_bytes,
+        "optimizer_state_bytes": _nested_tensor_bytes(state),
+    }
+
+
 def dist_train_step(
     model: nn.Module,
     optimizer: Optimizer,
     inputs: torch.Tensor,
     targets: torch.Tensor,
+    memory_samples: dict[str, list[int]] | None = None,
 ) -> tuple[float, float]:
     """Run one distributed training step and return ``(step_ms, comm_ms)``.
 
@@ -326,6 +372,9 @@ def dist_train_step(
     (DDP today, FSDP later); plain modules report 0 comm time.
     """
     timer = timeit.default_timer
+
+    if memory_samples is not None:
+        torch.cuda.reset_peak_memory_stats()
 
     step_start = timer()
 
@@ -345,8 +394,26 @@ def dist_train_step(
     torch.cuda.synchronize()
     comm_stop = timer()
 
+    if memory_samples is not None:
+        memory_samples["memory_before_optimizer_step_bytes"].append(
+            torch.cuda.memory_allocated()
+        )
+        memory_samples["peak_forward_backward_bytes"].append(
+            torch.cuda.max_memory_allocated()
+        )
+        torch.cuda.reset_peak_memory_stats()
+
     optimizer.step()
     torch.cuda.synchronize()
+
+    if memory_samples is not None:
+        memory_samples["memory_after_optimizer_step_bytes"].append(
+            torch.cuda.memory_allocated()
+        )
+        memory_samples["peak_optimizer_step_bytes"].append(
+            torch.cuda.max_memory_allocated()
+        )
+
     step_stop = timer()
 
     return (step_stop - step_start) * 1e3, (comm_stop - comm_start) * 1e3
@@ -360,14 +427,18 @@ def benchmark_parallel_training(
     num_warmups: int = 5,
     num_trials: int = 20,
 ) -> dict[str, float]:
-    """Benchmark one rank of data-parallel training. Call from every rank.
+    """Benchmark time and CUDA memory for data-parallel training on every rank.
 
     Requires an initialized process group (the caller spawns workers and calls
     ``dist.init_process_group``). Builds the LM, wraps it with ``wrap_model``
     (DDP variant / FSDP / identity), builds the optimizer via ``make_optimizer``
-    (pluggable so a sharded optimizer can be benchmarked later), and times
-    ``num_trials`` training steps on a ``global_batch_size / world_size`` local
-    batch. Returns stats (ms) averaged across ranks.
+    (including sharded optimizers), profiles memory across warmup and measured
+    iterations, and times ``num_trials`` steps on a
+    ``global_batch_size / world_size`` local batch.
+
+    Memory results include live allocated bytes at the assignment's three
+    checkpoints, peak allocated bytes during each phase, and a tensor-memory
+    breakdown. Each metric is returned as both the rank mean and rank maximum.
     """
     assert dist.is_initialized(), "requires an initialized process group"
     world_size = dist.get_world_size()
@@ -376,7 +447,14 @@ def benchmark_parallel_training(
     ), f"world_size={world_size} must divide global_batch_size={global_batch_size}"
     local_batch_size = global_batch_size // world_size
 
+    torch.cuda.reset_peak_memory_stats()
     model = wrap_model(get_transformer_lm(config))
+    torch.cuda.synchronize()
+    memory_metrics = {
+        "memory_after_model_bytes": torch.cuda.memory_allocated(),
+        "peak_model_init_bytes": torch.cuda.max_memory_allocated(),
+    }
+
     if make_optimizer is None:
         make_optimizer = lambda params: AdamW(params, lr=1e-3)  # noqa: E731
     optimizer = make_optimizer(model.parameters())
@@ -392,6 +470,12 @@ def benchmark_parallel_training(
 
     step_times: list[float] = []
     comm_times: list[float] = []
+    memory_samples = {
+        "memory_before_optimizer_step_bytes": [],
+        "peak_forward_backward_bytes": [],
+        "memory_after_optimizer_step_bytes": [],
+        "peak_optimizer_step_bytes": [],
+    }
 
     for i in range(num_warmups + num_trials):
         inputs, targets = sample_local_batch()
@@ -400,10 +484,17 @@ def benchmark_parallel_training(
         dist.barrier()
         torch.cuda.synchronize()
 
-        step_ms, comm_ms = dist_train_step(model, optimizer, inputs, targets)
+        step_ms, comm_ms = dist_train_step(
+            model, optimizer, inputs, targets, memory_samples=memory_samples
+        )
         if i >= num_warmups:
             step_times.append(step_ms)
             comm_times.append(comm_ms)
+
+    memory_metrics.update(
+        {name: max(samples) for name, samples in memory_samples.items()}
+    )
+    memory_metrics.update(_training_memory_components(model, optimizer))
 
     stats = torch.tensor(
         [
@@ -419,10 +510,29 @@ def benchmark_parallel_training(
     stats /= world_size
 
     step_mean, step_std, comm_mean, comm_std = stats.tolist()
-    return {
+    results = {
         "step_ms_mean": step_mean,
         "step_ms_std": step_std,
         "comm_ms_mean": comm_mean,
         "comm_ms_std": comm_std,
         "comm_fraction": comm_mean / step_mean if step_mean else 0.0,
     }
+
+    memory_names = list(memory_metrics)
+    memory_mean = torch.tensor(
+        [memory_metrics[name] for name in memory_names],
+        dtype=torch.float64,
+        device=DEVICE,
+    )
+    memory_max = memory_mean.clone()
+    dist.all_reduce(memory_mean)
+    memory_mean /= world_size
+    dist.all_reduce(memory_max, op=dist.ReduceOp.MAX)
+
+    for name, mean_value, max_value in zip(
+        memory_names, memory_mean.tolist(), memory_max.tolist()
+    ):
+        results[f"{name}_mean"] = mean_value
+        results[f"{name}_max"] = max_value
+
+    return results
