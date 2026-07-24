@@ -1,0 +1,38 @@
+{
+  "cli_version": "0.7.7",
+  "checkpoint_id": "297360714a5d",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "benchmark_optimizer_state.py",
+    "charts/fsdp_accounting_xl_ws2.json",
+    "charts/fsdp_accounting_xl_ws2_memory.png",
+    "charts/fsdp_accounting_xl_ws2_speed.png",
+    "charts/fsdp_accounting_xl_ws8.json",
+    "charts/fsdp_accounting_xl_ws8_memory.png",
+    "charts/fsdp_accounting_xl_ws8_speed.png",
+    "charts/optimizer_state_sharding_small_ws2.json",
+    "charts/optimizer_state_sharding_small_ws2_memory.png",
+    "charts/optimizer_state_sharding_small_ws2_speed.png",
+    "charts/optimizer_state_sharding_xl_ws2.json",
+    "charts/optimizer_state_sharding_xl_ws2_memory.png",
+    "charts/optimizer_state_sharding_xl_ws2_speed.png",
+    "cs336_systems/benchmarking.py",
+    "cs336_systems/dist/__init__.py",
+    "cs336_systems/dist/ddp.py",
+    "cs336_systems/dist/optim.py",
+    "fsdp-primitives.md",
+    "tests/adapters.py",
+    "tests/test_benchmarking_memory.py",
+    "tests/test_fsdp_regressions.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/29/7360714a5d/0/metadata.json",
+      "transcript": "/29/7360714a5d/0/full.jsonl",
+      "content_hash": "/29/7360714a5d/0/content_hash.txt",
+      "prompt": "/29/7360714a5d/0/prompt.txt"
+    }
+  ]
+}

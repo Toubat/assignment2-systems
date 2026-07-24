@@ -1,0 +1,76 @@
+{
+  "cli_version": "0.7.7",
+  "checkpoint_id": "297360714a5d",
+  "session_id": "4d674a2a-eb3e-4a1a-a0bd-23ce2686b277",
+  "strategy": "manual-commit",
+  "created_at": "2026-07-24T06:49:15.081546Z",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "benchmark_optimizer_state.py",
+    "charts/fsdp_accounting_xl_ws2.json",
+    "charts/fsdp_accounting_xl_ws2_memory.png",
+    "charts/fsdp_accounting_xl_ws2_speed.png",
+    "charts/fsdp_accounting_xl_ws8.json",
+    "charts/fsdp_accounting_xl_ws8_memory.png",
+    "charts/fsdp_accounting_xl_ws8_speed.png",
+    "charts/optimizer_state_sharding_small_ws2.json",
+    "charts/optimizer_state_sharding_small_ws2_memory.png",
+    "charts/optimizer_state_sharding_small_ws2_speed.png",
+    "charts/optimizer_state_sharding_xl_ws2.json",
+    "charts/optimizer_state_sharding_xl_ws2_memory.png",
+    "charts/optimizer_state_sharding_xl_ws2_speed.png",
+    "cs336_systems/benchmarking.py",
+    "cs336_systems/dist/__init__.py",
+    "cs336_systems/dist/ddp.py",
+    "cs336_systems/dist/optim.py",
+    "fsdp-primitives.md",
+    "tests/adapters.py",
+    "tests/test_benchmarking_memory.py",
+    "tests/test_fsdp_regressions.py"
+  ],
+  "agent": "Cursor",
+  "model": "",
+  "turn_id": "2136c10d23d6",
+  "initial_attribution": {
+    "calculated_at": "2026-07-24T06:49:15.066714Z",
+    "agent_lines": 381,
+    "agent_removed": 0,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 88,
+    "total_committed": 381,
+    "total_lines_changed": 469,
+    "agent_percentage": 81.2366737739872,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 1189,
+      "user_lines_removed": 88,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        "benchmark_optimizer_state.py": 52,
+        "charts/fsdp_accounting_xl_ws2.json": 77,
+        "charts/fsdp_accounting_xl_ws8.json": 77,
+        "charts/optimizer_state_sharding_small_ws2.json": 51,
+        "charts/optimizer_state_sharding_xl_ws2.json": 26,
+        "cs336_systems/benchmarking.py": 16,
+        "fsdp-primitives.md": 717,
+        "tests/adapters.py": 4,
+        "tests/test_benchmarking_memory.py": 5,
+        "tests/test_fsdp_regressions.py": 164
+      },
+      "user_removed_per_file": {
+        "benchmark_optimizer_state.py": 26,
+        "charts/optimizer_state_sharding_small_ws2.json": 26,
+        "charts/optimizer_state_sharding_xl_ws2.json": 26,
+        "cs336_systems/benchmarking.py": 3,
+        "tests/adapters.py": 6,
+        "tests/test_benchmarking_memory.py": 1
+      }
+    }
+  ]
+}

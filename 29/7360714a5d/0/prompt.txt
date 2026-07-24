@@ -1,0 +1,351 @@
+What is the current mode on the active profile?
+
+---
+
+Modal, I mean
+
+---
+
+@ddp.py (81-83) can we do RecudeOp.AVG here So do remove the /=
+
+---
+
+Shouldn't we use the `torch.no_grad` context manager?
+
+---
+
+Help me to understand this. What is K and what is the wierd symbol of 7.5B means? what is N_d?
+
+---
+
+可是你能先给我解释清楚 2 + 2 + K 是啥吗？你不是说好的 master parameter first and second momentum are floating point 32, which means 4 bytes. Where does the FP16 come from?
+
+---
+
+你的意思是，Adam optimizer 首先需要 upcast the 16-bit parameter into FP32？
+
+---
+
+所以，model weight 跟 master weight 有他妈鸡巴什么区别呢？
+
+---
+
+能不能给我一段 small piece of code，然后告诉我哪里他妈了个逼的生成了 model weight from master weight？
+
+---
+
+model_weight = master_weight.detach().to(torch.float16)
+
+我们在写 code 的时候，从来不用这种代码。能不能给我一个 productionized code？
+
+---
+
+那按我的理解是，这个当 casting 是 lazy 的，而不是当你写 with torch.autocast("cuda", dtype=torch.float16):的时候全部都保留一遍 FP16 的 copy，是吗？
+
+如果是 lazy 的话，那这个图显示就不对了。这个图的显示的意思是 "as if we create another copy of all parameters with floating-point 16", but the casting is actually only temporary. The max allocation is per layer, not the full parameter size.
+
+---
+
+能不能帮我统计一下我们的 XL 模型有多少个参数？what is the greek letter
+
+---
+
+但是，甚至我们的跟 Ze-Zero 它本身的不一样，我觉得 Zero 它那个还是错的。因为除了它 downcast catch 过的 2+2 之外，我们还要 keep 一部分 master weight，也就是应该是 4+2+2+K 才对。
+
+---
+
+OK，那当我们使用了 sharded optimizer 之后，根据我们的 benchmark 来讲，我们的 optimizer state 是多少？
+
+---
+
+解释一下这个 jump。
+
+---
+
+Activation 是啥来着？
+
+---
+
+所以对于问题C,区别就是在于我们没有 Autocast, 所以我们是 4 + 4 + 4 + 4 The baseline, 然后 4 PSI + 4 PSI + 8 PSI ÷ 2 的 PSI。
+
+---
+
+所以对于问题C,区别就是在于我们没有 Autocast, 所以我们是 4 + 4 + 4 + 4 The baseline, 然后 4 PSI + 4 PSI + 8 PSI ÷ 2 的 P_OS。
+
+---
+
+Why is the communication cost for naive DDP twice the parameter?
+
+---
+
+My main question is: what exactly does the communication cost track? 
+
+For example, does it mean we count each GPU's outgoing and incoming bandwidth and sum them up together, or else?
+
+---
+
+Where does the n - 1 / n come from?
+
+---
+
+OK，我明白了，但不应该在一阶段的零度上只使用最低估设置删除的模型吗？
+
+---
+
+OK，我明白了，My next question is: shouldn't ZeRO Stage 1 fully broadcast the gradient as described in the chart? But why does the slide say it has reduced scatter on sending gradient?
+
+---
+
+不是，但是你看这张图，橙色的是什么？我问你。
+
+---
+
+你如果不 all gather 给所有 GPU，那我做下一次 forward 的时候，我他妈每一个 GPU 上只有一个 chunk 的 parameter gets updates，others are not.
+
+---
+
+OK，你能给我列举一个 side by side 的 comparison。根据你上面这个流程图，describe 我们的 workflow 和 zero one 的 workflow，我要 compare。
+
+---
+
+那这个 naive DDP 的 communication cost 难道不应该是 3 × number of parameters 吗？而且不应该是三乘吧，应该是三乘四，因为我们用的是 FP16。
+
+---
+
+Memory 显示的 4+K4 是等于 model weight + gradient 吗？
+
+---
+
+我想要你修改我的代码，用 Autocast.然后重新用 Model 测 benchmark 一遍，override掉之前的 PNG 图和 JSON。
+
+---
+
+在这个 follow 4+K 的吗？
+
+---
+
+为什么 Outcast 还是不行？
+
+---
+
+所以我能不能说，Zero 它显示的这个东西只是 theoretical 的，实际上跟那个不一样？
+
+---
+
+最后一个问题，这里难道不是 3 primes 吗？
+
+---
+
+What does all-gather on parameter actually perform?
+
+e.g. If a param is of (batch_size, d)
+
+What would it become in each GPU?
+
+---
+
+Check @cs336_assignment2_systems.pdf page 38 to 29
+
+---
+
+Check @cs336_assignment2_systems.pdf page 38 to 39
+
+---
+
+Explain each primitives needed to implement FSDP. like reduce scatter, all gather, how to load and free each layer weight
+
+---
+
+Put in a /canvas plz
+
+---
+
+I don't like this canvas, I need more like an API documentation. Documenting method signatures with example usage. Do not use canvas. use md
+
+Also, Should I in __init__ to shard module first? How to shard it?
+
+---
+
+This means we SHOULD or SHOULD NOT shard linear and embed
+
+---
+
+so we only shard those 2
+
+---
+
+what does .data and .detach() do?
+
+---
+
+why not just directly .clone()
+
+---
+
+what is padding primitive
+
+---
+
+how to scatter shards to each rank?@ddp.py (134-136)
+
+---
+
+But they don't.. right? we haven't broadcast the linear weight yet @ddp.py (120-125) ... Or should we?
+
+---
+
+Evaluate current solution
+
+---
+
+Evaluate now
+
+---
+
+@ddp.py (150-152) this is local master shard!! What are you talking aabout????
+
+---
+
+Why would I replace param.data? I dont need to
+
+---
+
+don't I have forward hook???? If I register a specific hook, inside which I reconstruct the temporry full weight
+
+---
+
+How to use all gather
+
+---
+
+comm_shard = metadata.local_master_shard.to(dtype)
+
+will this .to() override the local_master_shard
+
+---
+
+comm_shard = metadata.local_master_shard.to(dtype)
+
+will this .to() override the local_master_shard's underlining data type?
+
+---
+
+@ddp.py (139-144) need contiguous()
+
+---
+
+@ddp.py (139-144) need contiguous() ?
+
+---
+
+Evaluate correctness of current forward stage
+
+---
+
+check now
+
+---
+
+but what is after gradient update?? then local master shard become unsynced to weight.data'
+
+---
+
+How this "prefetch" is been done in code?
+
+---
+
+@ddp.py (163-168) But this require the ordering of this is sequential
+
+---
+
+For this part of the assignment, do I also need to modify the optimizer?
+
+---
+
+What hooks are relevant for the back work? 
+
+Also, you mentioned I don't need to modify the optimizer, but shouldn't we apply zero, zero stage one, where we separate, where we don't communicate the full gradient, but instead only the partial gradient? Or do we not have to explicitly do it because sharding the linear and embedding weights already means that the gradients are automatically sharded as well?
+
+---
+
+So, at stage 3, after updating the gradient using Adam, we don't need the all-gather step simply because the sharded gradient already corresponds to the sharded weight. Is that correct?
+
+---
+
+You my code now
+
+---
+
+Can you help me to fix the first and second issue?
+
+---
+
+Can you check my current change? And modify certain places
+
+---
+
+@ddp.py (228-230) Here for overlapping communication and computation
+
+@ddp.py (185-195) And here, as part of the requirement, if compute D type is cur is provided, the communication should be cast to the compute type.
+
+---
+
+What do you mean by one-layer-ahead schedule?
+
+---
+
+How do I know the adjacency lineage or the ordering of different layers?
+
+---
+
+Check my implementation on the prefetching. I did not look at your implementation because I want to do my own review of the code.
+
+---
+
+Can you do it for me
+
+---
+
+add some comment for certain tricky point
+
+---
+
+@ddp.py (115-117) I don't see any point where it is necessary to cache this.
+
+---
+
+Add to test adapter and run in modal to test
+
+---
+
+@ddp.py (341-354) Should we reuse the wait or gather wait method?
+
+---
+
+Expect to cut memory by world_size?
+
+---
+
+modify this script to bench mark IMPLEMENTATIONS = ("unsharded", "sharded")
+
+to add fsdp
+
+If fsdp
+
+optim use original Adam and wrap_model use FSDP.
+
+---
+
+能不能帮我也 update 一下 PNG 和 JSON？ 我需要 compare 三个 Name it not the optimizer state, but FSDP instead.
+
+---
+
+Okay, let's do another run. Same Excel model but using eight GPUs.
+
+---
+
+crazy
+
+---
+
+Switch to toubatbrian@gmail.com for github commit and commit this change and then switch back to brian.yin@livekit.io profile. All in a single command
