@@ -9,7 +9,7 @@ from cs336_systems.kernels.flash_attn_triton import (
     FlashAttention as FlashAttentionTriton,
 )
 from cs336_systems.dist import DDP, NaiveDDP, ShardedOptimizer
-from cs336_systems.dist.ddp import BaseDDP
+from cs336_systems.dist.ddp import BaseDDP, FSDP
 
 # Select which DDP implementation get_ddp returns: overlap (default), naive, flat.
 DDP_IMPL = os.environ.get("DDP_IMPL", "overlap")
@@ -97,8 +97,7 @@ def get_fsdp(
     Returns:
         Instance of an FSDP class.
     """
-    # For example: return FSDP(module, compute_dtype=compute_dtype)
-    raise NotImplementedError
+    return FSDP(module, compute_dtype=compute_dtype)
 
 
 def fsdp_on_after_backward(
@@ -114,8 +113,7 @@ def fsdp_on_after_backward(
         optimizer: torch.optim.Optimizer
             Optimizer being used with the FSDP-wrapped model.
     """
-    # For example: fsdp_model.finish_gradient_synchronization()
-    raise NotImplementedError
+    cast(FSDP, fsdp_model).finish_gradient_synchronization()
 
 
 def fsdp_gather_full_params(fsdp_model: torch.nn.Module) -> dict[str, torch.Tensor]:
@@ -129,7 +127,7 @@ def fsdp_gather_full_params(fsdp_model: torch.nn.Module) -> dict[str, torch.Tens
     Returns:
         State dictionary mapping parameter names to full (unsharded) tensors.
     """
-    raise NotImplementedError
+    return cast(FSDP, fsdp_model).gather_full_params()
 
 
 def get_sharded_optimizer(

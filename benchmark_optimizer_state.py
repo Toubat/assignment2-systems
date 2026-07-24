@@ -1,7 +1,8 @@
-"""Modal benchmark for optimizer-state-sharding accounting (parts a and b).
+"""Modal BF16 benchmark for optimizer/FSDP sharding accounting.
 
-Compares ordinary AdamW with ``ShardedOptimizer`` using the same DDP model on
-one node with two GPUs. The assignment configuration is the default:
+Compares DDP with ordinary AdamW, DDP with ``ShardedOptimizer``, and FSDP with
+ordinary AdamW on one node with two GPUs. The assignment configuration is the
+default:
 
     modal run benchmark_optimizer_state.py
 
@@ -18,7 +19,7 @@ import os
 
 import modal
 
-app = modal.App("optimizer-state-sharding-accounting")
+app = modal.App("fsdp-accounting")
 
 GPU_TYPE = os.environ.get("GPU_TYPE", "H200")
 GPU_COUNT = int(os.environ.get("GPU_COUNT", "2"))
@@ -44,7 +45,7 @@ with image.imports():
 
     from cs336_basics.optimizer import AdamW
     from cs336_systems.benchmarking import LMConfig, benchmark_parallel_training
-    from cs336_systems.dist.ddp import DDP
+    from cs336_systems.dist.ddp import DDP, FSDP
     from cs336_systems.dist.optim import ShardedOptimizer
     from cs336_systems.plots import grouped_bar_chart
 
@@ -58,7 +59,7 @@ MODEL_SIZES = {
     "xl": (2560, 10240, 32, 32),
 }
 
-IMPLEMENTATIONS = ("unsharded", "sharded")
+IMPLEMENTATIONS = ("unsharded", "sharded", "fsdp")
 
 
 def get_config(size: str) -> "LMConfig":
@@ -81,6 +82,7 @@ def benchmark_worker(
     global_batch_size: int,
     num_warmups: int,
     num_trials: int,
+    autocast_bfloat16: bool,
     port: int,
     result_path: str,
 ) -> None:
@@ -90,19 +92,25 @@ def benchmark_worker(
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
 
     if implementation == "unsharded":
+        wrap_model = DDP
         make_optimizer = lambda params: AdamW(params, lr=1e-3)
     elif implementation == "sharded":
+        wrap_model = DDP
         make_optimizer = lambda params: ShardedOptimizer(params, AdamW, lr=1e-3)
+    elif implementation == "fsdp":
+        wrap_model = FSDP
+        make_optimizer = lambda params: AdamW(params, lr=1e-3)
     else:
         raise ValueError(f"unknown implementation: {implementation}")
 
     results = benchmark_parallel_training(
         config=get_config(size),
-        wrap_model=DDP,
+        wrap_model=wrap_model,
         make_optimizer=make_optimizer,
         global_batch_size=global_batch_size,
         num_warmups=num_warmups,
         num_trials=num_trials,
+        autocast_bfloat16=autocast_bfloat16,
     )
 
     if rank == 0:
@@ -116,13 +124,15 @@ def plot_speed_results(
     results: dict[str, dict[str, float]],
     size: str,
     world_size: int,
+    autocast_bfloat16: bool,
 ) -> bytes:
     implementations = list(IMPLEMENTATIONS)
     gpu_name = torch.cuda.get_device_name(0)
+    precision = "BF16 autocast" if autocast_bfloat16 else "FP32"
     path = grouped_bar_chart(
-        f"optimizer_state_sharding_speed_{size}_ws{world_size}.png",
-        f"Optimizer state sharding training speed ({size}, {world_size}x {gpu_name})",
-        "optimizer",
+        f"fsdp_accounting_speed_{size}_ws{world_size}.png",
+        f"FSDP comparison speed ({size}, {precision}, {world_size}x {gpu_name})",
+        "implementation",
         "mean time per iteration (ms)",
         categories=implementations,
         groups={
@@ -139,8 +149,10 @@ def plot_memory_results(
     results: dict[str, dict[str, float]],
     size: str,
     world_size: int,
+    autocast_bfloat16: bool,
 ) -> bytes:
     gpu_name = torch.cuda.get_device_name(0)
+    precision = "BF16 autocast" if autocast_bfloat16 else "FP32"
     metrics = (
         ("after model init", "memory_after_model_bytes_max"),
         ("before opt step", "memory_before_optimizer_step_bytes_max"),
@@ -152,8 +164,8 @@ def plot_memory_results(
         ("optimizer state", "optimizer_state_bytes_max"),
     )
     path = grouped_bar_chart(
-        f"optimizer_state_sharding_memory_{size}_ws{world_size}.png",
-        f"Optimizer state sharding memory ({size}, {world_size}x {gpu_name})",
+        f"fsdp_accounting_memory_{size}_ws{world_size}.png",
+        f"FSDP comparison memory ({size}, {precision}, {world_size}x {gpu_name})",
         "checkpoint / component",
         "maximum per-rank allocated memory (GiB)",
         categories=[label for label, _ in metrics],
@@ -174,13 +186,14 @@ def run_benchmark(
     global_batch_size: int,
     num_warmups: int,
     num_trials: int,
+    autocast_bfloat16: bool,
 ) -> tuple[dict[str, dict[str, float]], bytes, bytes]:
     assert world_size <= torch.cuda.device_count()
 
     results: dict[str, dict[str, float]] = {}
     for index, implementation in enumerate(IMPLEMENTATIONS):
         print(f"--- {implementation}: {size}, world_size={world_size} ---")
-        result_path = f"/tmp/optimizer_state_{implementation}.json"
+        result_path = f"/tmp/fsdp_accounting_{implementation}.json"
         spawn(
             fn=benchmark_worker,
             args=(
@@ -190,6 +203,7 @@ def run_benchmark(
                 global_batch_size,
                 num_warmups,
                 num_trials,
+                autocast_bfloat16,
                 29700 + index,
                 result_path,
             ),
@@ -201,8 +215,8 @@ def run_benchmark(
 
     return (
         results,
-        plot_memory_results(results, size, world_size),
-        plot_speed_results(results, size, world_size),
+        plot_memory_results(results, size, world_size, autocast_bfloat16),
+        plot_speed_results(results, size, world_size, autocast_bfloat16),
     )
 
 
@@ -217,17 +231,26 @@ def main(
     global_batch_size: int = DEFAULT_GLOBAL_BATCH_SIZE,
     num_warmups: int = 5,
     num_trials: int = 10,
+    autocast_bfloat16: bool = True,
 ) -> None:
     assert size in MODEL_SIZES, f"choose from {list(MODEL_SIZES)}"
-    assert world_size == 2, "the assignment setting requires two GPUs"
+    assert world_size >= 1, "world_size must be positive"
+    assert (
+        global_batch_size % world_size == 0
+    ), "global_batch_size must be divisible by world_size"
     assert GPU_COUNT >= world_size, f"set GPU_COUNT>={world_size}"
 
     results, memory_chart, speed_chart = run_benchmark.remote(
-        size, world_size, global_batch_size, num_warmups, num_trials
+        size,
+        world_size,
+        global_batch_size,
+        num_warmups,
+        num_trials,
+        autocast_bfloat16,
     )
 
     os.makedirs("charts", exist_ok=True)
-    output_stem = f"charts/optimizer_state_sharding_{size}_ws{world_size}"
+    output_stem = f"charts/fsdp_accounting_{size}_ws{world_size}"
     with open(f"{output_stem}.json", "w") as file:
         json.dump(results, file, indent=2)
     with open(f"{output_stem}_memory.png", "wb") as file:
@@ -248,25 +271,28 @@ def main(
 
     print(
         f"\n{'metric':>24} {'unsharded (GiB)':>18} "
-        f"{'sharded (GiB)':>16} {'reduction':>12}"
+        f"{'sharded (GiB)':>16} {'fsdp (GiB)':>14}"
     )
     for label, key in metrics:
         unsharded = gibibytes(results["unsharded"][key])
         sharded = gibibytes(results["sharded"][key])
-        reduction = 1 - sharded / unsharded if unsharded else 0.0
-        print(f"{label:>24} {unsharded:>18.2f} " f"{sharded:>16.2f} {reduction:>11.1%}")
+        fsdp = gibibytes(results["fsdp"][key])
+        print(f"{label:>24} {unsharded:>18.2f} " f"{sharded:>16.2f} {fsdp:>14.2f}")
 
-    print(f"\n{'optimizer':>12} {'step time (ms)':>20}")
+    print(f"\n{'implementation':>14} {'step time (ms)':>20}")
     for implementation in IMPLEMENTATIONS:
         result = results[implementation]
         print(
             f"{implementation:>12} "
             f"{result['step_ms_mean']:>12.2f} ±{result['step_ms_std']:>5.2f}"
         )
-    speed_overhead = (
-        results["sharded"]["step_ms_mean"] / results["unsharded"]["step_ms_mean"] - 1
-    )
-    print(f"Sharding time overhead: {speed_overhead:.1%}")
+    for implementation in ("sharded", "fsdp"):
+        speed_overhead = (
+            results[implementation]["step_ms_mean"]
+            / results["unsharded"]["step_ms_mean"]
+            - 1
+        )
+        print(f"{implementation} time overhead: {speed_overhead:.1%}")
     print(
         f"\nSaved {output_stem}.json, "
         f"{output_stem}_memory.png, and {output_stem}_speed.png"

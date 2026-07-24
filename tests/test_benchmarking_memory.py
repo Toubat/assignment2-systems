@@ -77,9 +77,12 @@ def test_parallel_training_reports_memory_checkpoints(monkeypatch):
     )
     profiled_steps = 0
 
-    def fake_dist_train_step(*args, memory_samples=None, **kwargs):
+    def fake_dist_train_step(
+        *args, memory_samples=None, autocast_bfloat16=False, **kwargs
+    ):
         nonlocal profiled_steps
         assert memory_samples is not None
+        assert autocast_bfloat16
         profiled_steps += 1
         memory_samples["memory_before_optimizer_step_bytes"].append(100)
         memory_samples["peak_forward_backward_bytes"].append(150)
@@ -96,6 +99,7 @@ def test_parallel_training_reports_memory_checkpoints(monkeypatch):
         global_batch_size=1,
         num_warmups=1,
         num_trials=2,
+        autocast_bfloat16=True,
     )
 
     assert profiled_steps == 3

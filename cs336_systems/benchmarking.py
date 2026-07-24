@@ -355,6 +355,7 @@ def dist_train_step(
     inputs: torch.Tensor,
     targets: torch.Tensor,
     memory_samples: dict[str, list[int]] | None = None,
+    autocast_bfloat16: bool = False,
 ) -> tuple[float, float]:
     """Run one distributed training step and return ``(step_ms, comm_ms)``.
 
@@ -379,8 +380,14 @@ def dist_train_step(
     step_start = timer()
 
     optimizer.zero_grad()
-    logits = model(inputs)
-    loss = cross_entropy(logits, targets)
+    ctx = (
+        torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+        if autocast_bfloat16
+        else nullcontext()
+    )
+    with ctx:
+        logits = model(inputs)
+        loss = cross_entropy(logits, targets)
     loss.backward()
 
     # Wait for backward *compute* only; async NCCL streams keep running.
@@ -426,6 +433,7 @@ def benchmark_parallel_training(
     global_batch_size: int = 4,
     num_warmups: int = 5,
     num_trials: int = 20,
+    autocast_bfloat16: bool = False,
 ) -> dict[str, float]:
     """Benchmark time and CUDA memory for data-parallel training on every rank.
 
@@ -485,7 +493,12 @@ def benchmark_parallel_training(
         torch.cuda.synchronize()
 
         step_ms, comm_ms = dist_train_step(
-            model, optimizer, inputs, targets, memory_samples=memory_samples
+            model,
+            optimizer,
+            inputs,
+            targets,
+            memory_samples=memory_samples,
+            autocast_bfloat16=autocast_bfloat16,
         )
         if i >= num_warmups:
             step_times.append(step_ms)

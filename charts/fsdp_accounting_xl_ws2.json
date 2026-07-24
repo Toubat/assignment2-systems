@@ -1,10 +1,10 @@
 {
   "unsharded": {
-    "step_ms_mean": 297.25140380859375,
-    "step_ms_std": 2.0761101245880127,
-    "comm_ms_mean": 1.432168960571289,
-    "comm_ms_std": 0.3238682746887207,
-    "comm_fraction": 0.0048180393506013245,
+    "step_ms_mean": 292.47052001953125,
+    "step_ms_std": 0.2925700545310974,
+    "comm_ms_mean": 1.2533507347106934,
+    "comm_ms_std": 0.134418785572052,
+    "comm_fraction": 0.004285391685380784,
     "memory_after_model_bytes_mean": 13762340864.0,
     "memory_after_model_bytes_max": 13762340864.0,
     "peak_model_init_bytes_mean": 13762340864.0,
@@ -25,11 +25,11 @@
     "optimizer_state_bytes_max": 27254476800.0
   },
   "sharded": {
-    "step_ms_mean": 279.328369140625,
-    "step_ms_std": 1.550318956375122,
-    "comm_ms_mean": 1.1476502418518066,
-    "comm_ms_std": 0.11211049556732178,
-    "comm_fraction": 0.004108606101781355,
+    "step_ms_mean": 276.9983215332031,
+    "step_ms_std": 1.619633436203003,
+    "comm_ms_mean": 1.3756229877471924,
+    "comm_ms_std": 0.1590776890516281,
+    "comm_fraction": 0.004966178062498836,
     "memory_after_model_bytes_mean": 13762340864.0,
     "memory_after_model_bytes_max": 13762340864.0,
     "peak_model_init_bytes_mean": 13762340864.0,
@@ -48,5 +48,30 @@
     "gradient_bytes_max": 13627238400.0,
     "optimizer_state_bytes_mean": 13627238400.0,
     "optimizer_state_bytes_max": 13832028160.0
+  },
+  "fsdp": {
+    "step_ms_mean": 317.19329833984375,
+    "step_ms_std": 6.684878826141357,
+    "comm_ms_mean": 2.4939935207366943,
+    "comm_ms_std": 0.3994886875152588,
+    "comm_fraction": 0.007862692981818952,
+    "memory_after_model_bytes_mean": 6880176128.0,
+    "memory_after_model_bytes_max": 6880176128.0,
+    "peak_model_init_bytes_mean": 13916301312.0,
+    "peak_model_init_bytes_max": 13916301312.0,
+    "memory_before_optimizer_step_bytes_mean": 27466261504.0,
+    "memory_before_optimizer_step_bytes_max": 27466261504.0,
+    "peak_forward_backward_bytes_mean": 39991377408.0,
+    "peak_forward_backward_bytes_max": 40140359168.0,
+    "memory_after_optimizer_step_bytes_mean": 27478287360.0,
+    "memory_after_optimizer_step_bytes_max": 27478287360.0,
+    "peak_optimizer_step_bytes_mean": 27734287360.0,
+    "peak_optimizer_step_bytes_max": 27734287360.0,
+    "parameter_bytes_mean": 6813952000.0,
+    "parameter_bytes_max": 6813952000.0,
+    "gradient_bytes_mean": 6813952000.0,
+    "gradient_bytes_max": 6813952000.0,
+    "optimizer_state_bytes_mean": 13627904000.0,
+    "optimizer_state_bytes_max": 13627904000.0
   }
 }
